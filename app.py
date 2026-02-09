@@ -45,17 +45,17 @@ from sections import liquidity_stress, liquidation_failure, contagion
 
 pages = {
     "Case Study": [
-        st.Page(overview.render, title="Overview & Timeline", icon="📋"),
-        st.Page(market_exposure.render, title="Market Exposure", icon="🎯"),
-        st.Page(bad_debt.render, title="Bad Debt Analysis", icon="💀"),
+        st.Page(overview.render, title="Overview & Timeline", icon="📋", url_path="overview"),
+        st.Page(market_exposure.render, title="Market Exposure", icon="🎯", url_path="markets"),
+        st.Page(bad_debt.render, title="Bad Debt Analysis", icon="💀", url_path="bad-debt"),
     ],
     "Response & Stress": [
-        st.Page(curator_response.render, title="Curator Response", icon="🏷️"),
-        st.Page(liquidity_stress.render, title="Liquidity Stress", icon="📉"),
+        st.Page(curator_response.render, title="Curator Response", icon="🏷️", url_path="curators"),
+        st.Page(liquidity_stress.render, title="Liquidity Stress", icon="📉", url_path="stress"),
     ],
     "Risk Outcomes": [
-        st.Page(liquidation_failure.render, title="Liquidation Failure", icon="⚡"),
-        st.Page(contagion.render, title="Contagion Assessment", icon="🕸️"),
+        st.Page(liquidation_failure.render, title="Liquidation Failure", icon="⚡", url_path="liquidation"),
+        st.Page(contagion.render, title="Contagion Assessment", icon="🕸️", url_path="contagion"),
     ],
 }
 
