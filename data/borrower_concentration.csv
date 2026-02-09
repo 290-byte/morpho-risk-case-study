@@ -1,0 +1,8 @@
+market,num_borrowers,total_borrow_usd,top_borrower_pct,concentration
+sdeUSD/USDC (Ethereum),7,49822906,100.0,CONCENTRATED
+xUSD/USDC (Arbitrum),3,4476303,100.0,CONCENTRATED
+deUSD/USDC (Ethereum),13,7857,85.5,CONCENTRATED
+deUSD/USDC (Ethereum-2),1,1,100.0,SINGLE
+xUSD/USDC (Ethereum),1,0,100.0,SINGLE
+deUSD/USDC (Ethereum-3),1,8,100.0,SINGLE
+xUSD/USDC (Arbitrum-2),1,3,100.0,SINGLE

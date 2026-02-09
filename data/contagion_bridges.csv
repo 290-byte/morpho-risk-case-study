@@ -1,0 +1,5 @@
+vault_name,toxic_markets,toxic_exposure_usd,clean_markets,clean_exposure_usd,bridge_type
+Adpend USDC,1,2589934,29,0,BRIDGE
+1337 USDC,1,1380721,3,0,BRIDGE
+Not Gauntlet,1,232101,9,0,BRIDGE
+MEV Capital Elixir USDC,1,7844,2,0,BRIDGE

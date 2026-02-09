@@ -1,0 +1,21 @@
+vault_name,chain,curator,tvl_usd,exposure_usd,collateral,status,discovery,listed,timelock_days,share_price,share_price_drawdown,peak_allocation,response_class,response_date,days_before_depeg
+Gauntlet USDC Frontier,ethereum,Gauntlet,192673915,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,True,3.0,1.069585,0.0,1930000,PROACTIVE,2025-09-01,63.5
+Smokehouse USDC,ethereum,Steakhouse Financial,73180753,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,True,3.0,1.094188,0.0,0,PROACTIVE,2025-09-01,63.0
+Gauntlet USDC Core,ethereum,Gauntlet,32133106,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,True,3.0,1.140453,0.0,2250000,PROACTIVE,2025-09-01,63.9
+Hyperithm USDC Degen,ethereum,Hyperithm,28110729,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,True,3.0,1.069733,0.0,18500000,PROACTIVE,2025-09-01,63.8
+Hyperithm USDC,Arbitrum,Hyperithm,20204606,0,xUSD,HISTORICALLY_EXPOSED,historical_reallocation,True,3.0,1.0286,0.0,10000000,PROACTIVE,2025-09-23,41.3
+MEV Capital USDC,ethereum,MEV Capital,17530694,7784,sdeUSD,ACTIVE_DEPEG,current_allocation,True,3.0,1.084258,-0.0313,6830000,PROACTIVE,2025-09-02,62.6
+Hakutora USDC,ethereum,Hakutora,17226167,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,True,3.0,1.062046,0.0,0,SLOW_REACTOR,2025-11-08,-4.0
+Adpend USDC,ethereum,Unknown,2570397,2570397,deUSD,STOPPED_SUPPLYING,current_allocation,False,14.0,2.918997,0.0,2180000,PROACTIVE,2025-09-02,62.7
+Clearstar High Yield USDC,Arbitrum,Clearstar,1884930,0,xUSD,HISTORICALLY_EXPOSED,historical_reallocation,True,3.0,1.020279,0.0,0,EARLY_REACTOR,2025-10-28,7.0
+1337 USDC,ethereum,Unknown,1370305,1370305,xUSD,ACTIVE_DEPEG,current_allocation,False,0.0,4.863145,0.0,1160000,EARLY_REACTOR,2025-11-01,2.8
+MEV Capital USDC,Arbitrum,MEV Capital,652017,0,xUSD,HISTORICALLY_EXPOSED,historical_reallocation,False,3.0,1.025651,0.0,0,PROACTIVE,2025-09-18,46.3
+Avantgarde USDC Core,ethereum,Avantgarde,343152,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,True,3.0,1.049891,0.0,0,PROACTIVE,2025-09-01,63.0
+Not Gauntlet,Arbitrum,Unknown,230376,230376,xUSD,ACTIVE_DEPEG,current_allocation,False,0.0,1.0,0.0,0,PROACTIVE,2025-10-27,7.7
+Clearstar USDC Reactor,Arbitrum,Clearstar,219887,0,xUSD,HISTORICALLY_EXPOSED,historical_reallocation,False,3.0,1.0,0.0,0,PROACTIVE,2025-10-11,23.4
+Relend USDC,ethereum,B.Protocol,63751,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,False,3.0,0.017446,-0.984,4530000,PROACTIVE,2025-09-02,62.3
+MEV Capital Elixir USDC,ethereum,MEV Capital,7784,7784,sdeUSD,ACTIVE_DEPEG,current_allocation,False,1.0,1.0,0.0,0,PROACTIVE,2025-09-01,63.0
+Vaultik USDC,ethereum,Unknown,7784,7784,deUSD,ACTIVE_DEPEG,current_allocation,False,0.0,1.0,0.0,0,VERY_LATE,2026-01-31,-88.0
+Elixir USDC,ethereum,Gauntlet,3072,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,False,3.0,1.0,0.0,0,PROACTIVE,2025-10-02,32.2
+Tanken USDC,ethereum,Unknown,6695,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,False,3.0,1.0,0.0,0,PROACTIVE,2025-09-01,63.0
+Duplicated Key,ethereum,Unknown,49272,0,sdeUSD,HISTORICALLY_EXPOSED,historical_reallocation,False,0.0,1.0,0.0,0,VERY_LATE,2026-01-31,-88.0

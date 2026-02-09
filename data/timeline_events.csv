@@ -1,0 +1,14 @@
+date,event,category,severity
+2025-09-01,Baseline — normal operations begin,baseline,info
+2025-09-29,Gauntlet fully exits toxic market allocations,curator_action,positive
+2025-10-10,ETH crashes ~21%; DeMattia liquidated on personal positions,trigger,warning
+2025-10-28,Schlag exposes circular xUSD-deUSD dependency,warning,warning
+2025-10-28,Hyperithm begins withdrawal from sdeUSD markets,curator_action,positive
+2025-11-02,DeMattia admits losing 'nearly all' funds,trigger,critical
+2025-11-03,Stream Finance halts withdrawals — xUSD depegs to $0.26,depeg,critical
+2025-11-04,Oracle blind spot — hardcoded oracle still reports xUSD ≈ $1.00,oracle_failure,critical
+2025-11-06,Elixir announces deUSD sunset — deUSD crashes to $0.015,depeg,critical
+2025-11-08,Hakutora exits toxic allocations (slow reactor),curator_action,warning
+2025-11-12,MEV Capital USDC share price trough — 3.13% drawdown,impact,critical
+2025-11-14,Relend USDC share price hits $0.017 — 98.4% drawdown,impact,critical
+2025-12-08,Largest liquidation event on sdeUSD/pUSD ($21K),liquidation,warning
