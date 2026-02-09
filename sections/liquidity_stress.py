@@ -45,8 +45,9 @@ def render():
         fig.update_xaxes(title="")
         
         # Add 100% reference line
-        fig.add_hline(y=1.0, line_dash="dot", line_color="rgba(255,255,255,0.2)",
-                       annotation_text="100%", annotation_position="right")
+        fig.add_hline(y=1.0, line_dash="dot", line_color="rgba(255,255,255,0.2)")
+        fig.add_annotation(x=1, xref="paper", y=1.0, text="100%",
+                           showarrow=False, font=dict(size=10, color="rgba(255,255,255,0.4)"), xshift=10)
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)

@@ -51,8 +51,10 @@ def render():
         ))
 
     # Depeg line
-    fig.add_vline(x="2025-11-04", line_dash="dash", line_color=RED, opacity=0.7,
-                   annotation_text="DEPEG", annotation_font=dict(color=RED, size=11))
+    import pandas as pd_dt
+    fig.add_vline(x=pd_dt.Timestamp("2025-11-04"), line_dash="dash", line_color=RED, opacity=0.7)
+    fig.add_annotation(x=pd_dt.Timestamp("2025-11-04"), y=1, yref="paper", text="DEPEG",
+                       showarrow=False, font=dict(color=RED, size=11), yshift=10)
 
     fig = apply_layout(fig, height=550)
     fig.update_xaxes(title="Response Date", range=["2025-08-15", "2026-02-15"])

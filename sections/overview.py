@@ -43,10 +43,13 @@ def render():
                 hovertemplate="%{x}<br>%{y:$.4f}<extra>" + asset + "</extra>",
             ))
 
-        fig.add_vline(x="2025-11-04", line_dash="dash", line_color=RED, opacity=0.5,
-                       annotation_text="Depeg Start", annotation_position="top")
-        fig.add_vline(x="2025-11-06", line_dash="dot", line_color="#f97316", opacity=0.5,
-                       annotation_text="deUSD Sunset", annotation_position="bottom")
+        import pandas as pd
+        fig.add_vline(x=pd.Timestamp("2025-11-04"), line_dash="dash", line_color=RED, opacity=0.5)
+        fig.add_annotation(x=pd.Timestamp("2025-11-04"), y=1, yref="paper", text="Depeg Start",
+                           showarrow=False, font=dict(size=10, color=RED), yshift=10)
+        fig.add_vline(x=pd.Timestamp("2025-11-06"), line_dash="dot", line_color="#f97316", opacity=0.5)
+        fig.add_annotation(x=pd.Timestamp("2025-11-06"), y=0, yref="paper", text="deUSD Sunset",
+                           showarrow=False, font=dict(size=10, color="#f97316"), yshift=-10)
         fig = apply_layout(fig, title="xUSD, deUSD & sdeUSD Price (USD)", height=420)
         fig.update_yaxes(tickformat="$.2f", range=[0, 1.2])
         st.plotly_chart(fig, use_container_width=True)

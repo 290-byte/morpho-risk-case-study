@@ -61,14 +61,19 @@ def apply_layout(fig, title=None, height=400, show_legend=True):
 
 def depeg_vline(fig, date="2025-11-04", label="Depeg"):
     """Add a vertical dashed line marking the depeg event."""
+    import pandas as pd
+    dt = pd.Timestamp(date)
     fig.add_vline(
-        x=date,
+        x=dt,
         line_dash="dash",
         line_color=RED,
         opacity=0.6,
-        annotation_text=label,
-        annotation_position="top",
-        annotation_font=dict(size=10, color=RED),
+    )
+    fig.add_annotation(
+        x=dt, y=1, yref="paper",
+        text=label, showarrow=False,
+        font=dict(size=10, color=RED),
+        yshift=10,
     )
     return fig
 
