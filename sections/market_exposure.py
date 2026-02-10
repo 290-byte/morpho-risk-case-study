@@ -15,7 +15,7 @@ def render():
     vaults = load_vaults()
 
     if markets.empty:
-        st.warning("No market data available. Run `python generate_data.py` first.")
+        st.error("⚠️ Market data not available — run the pipeline to generate `block1_markets_graphql.csv`.")
         return
 
     # ── Key Metrics ─────────────────────────────────────────

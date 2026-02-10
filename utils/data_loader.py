@@ -1,14 +1,26 @@
 """
 Centralized data loading — adapts real block*.csv outputs to section schemas.
 
-Each loader reads the real block output, renames/transforms columns to match
-what the section code expects, and caches the result. If the block file is
-missing it falls back to the legacy generated CSV (if present) so the app
-still loads during development.
+STRICT MODE: Only loads real pipeline output (block*.csv files).
+No fallback to generated/fake data. If a block file is missing,
+returns an empty DataFrame and the section should show an appropriate message.
 
-Block file priority:
-    data/block*.csv  →  preferred (real API data)
-    data/*.csv       →  fallback  (legacy / generate_data.py)
+Exception: timeline_events.csv is editorial (hand-written), not generated.
+
+Block file mapping:
+    block1_markets_graphql.csv      → load_markets()
+    block1_vaults_graphql.csv       → load_vaults()
+    block2_share_prices_daily.csv   → load_share_prices()
+    block2_share_price_summary.csv  → merged into load_vaults()
+    block3_curator_profiles.csv     → merged into load_vaults()
+    block3_vault_net_flows.csv      → load_net_flows()
+    block3_market_utilization_hourly.csv → load_utilization()
+    block5_asset_prices.csv         → load_asset_prices()
+    block5_ltv_analysis.csv         → load_ltv()
+    block5_borrower_positions.csv   → load_borrowers()
+    block6_contagion_bridges.csv    → load_bridges()
+    block6_vault_allocation_summary.csv → load_exposure_summary()
+    timeline_events.csv             → load_timeline()  (editorial)
 """
 
 import streamlit as st
@@ -18,6 +30,9 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
+# Track which files are missing so sections can show warnings
+_missing_files: list = []
+
 
 # ── helpers ─────────────────────────────────────────────────────
 
@@ -25,6 +40,8 @@ def _read(filename: str) -> pd.DataFrame:
     """Read CSV from data dir, return empty DataFrame if missing."""
     path = DATA_DIR / filename
     if not path.exists():
+        if filename not in _missing_files:
+            _missing_files.append(filename)
         return pd.DataFrame()
     df = pd.read_csv(path)
     # Normalize: some block scripts use "blockchain", others use "chain"
@@ -42,6 +59,15 @@ def _market_label(row) -> str:
     return f"{collat}/{loan} ({short_chain})"
 
 
+def show_data_warnings():
+    """Call from app.py to display any missing data warnings."""
+    if _missing_files:
+        st.sidebar.warning(
+            f"⚠️ Missing data files: {', '.join(_missing_files)}. "
+            "Run the query pipeline to generate them."
+        )
+
+
 # ═══════════════════════════════════════════════════════════════
 #  LOADERS — one per logical dataset the sections consume
 # ═══════════════════════════════════════════════════════════════
@@ -49,13 +75,13 @@ def _market_label(row) -> str:
 @st.cache_data(ttl=3600)
 def load_markets() -> pd.DataFrame:
     """
+    Source: block1_markets_graphql.csv
     Section expects: chain, collateral, loan, lltv, supply_usd, borrow_usd,
     liquidity_usd, utilization, bad_debt_usd, bad_debt_share, status,
     oracle_type, whitelisted, market_label
     """
     df = _read("block1_markets_graphql.csv")
     if df.empty:
-        df = _read("markets.csv")
         return df
 
     rename = {
@@ -106,15 +132,15 @@ def load_markets() -> pd.DataFrame:
 @st.cache_data(ttl=3600)
 def load_vaults() -> pd.DataFrame:
     """
+    Source: block1_vaults_graphql.csv + block3_curator_profiles.csv + block2_share_price_summary.csv
     Section expects: vault_name, chain, curator, tvl_usd, exposure_usd,
     collateral, status, discovery, listed, timelock_days, share_price,
     share_price_drawdown, peak_allocation, response_class, response_date,
     days_before_depeg
     """
-    # ── Try block files ──────────────────────────────────────
     vaults_raw = _read("block1_vaults_graphql.csv")
     if vaults_raw.empty:
-        return _read("vaults.csv")
+        return vaults_raw
 
     # block1_vaults is per vault-market pair — aggregate to per vault
     vaults_raw["supply_assets_usd"] = pd.to_numeric(
@@ -207,15 +233,22 @@ def load_vaults() -> pd.DataFrame:
     if df["share_price_drawdown"].abs().max() > 1:
         df["share_price_drawdown"] = df["share_price_drawdown"] / 100
 
+    # Filter out test/invalid vault names
+    if "vault_name" in df.columns:
+        df = df[~df["vault_name"].str.contains("Duplicated Key|\\(Deployer\\)", case=False, na=False)]
+
     return df
 
 
 @st.cache_data(ttl=3600)
 def load_share_prices() -> pd.DataFrame:
-    """Section expects: date, vault_name, share_price"""
+    """
+    Source: block2_share_prices_daily.csv
+    Section expects: date, vault_name, share_price (+ vault_address, chain if available)
+    """
     df = _read("block2_share_prices_daily.csv")
     if df.empty:
-        df = _read("share_prices_daily.csv")
+        return df
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"])
     if "share_price" in df.columns:
@@ -225,12 +258,12 @@ def load_share_prices() -> pd.DataFrame:
 
 @st.cache_data(ttl=3600)
 def load_asset_prices() -> pd.DataFrame:
-    """Section expects: timestamp, asset, price_usd"""
+    """
+    Source: block5_asset_prices.csv
+    Section expects: timestamp, asset, price_usd
+    """
     df = _read("block5_asset_prices.csv")
     if df.empty:
-        df = _read("asset_prices.csv")
-        if "timestamp" in df.columns:
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
         return df
 
     # Map real block5 columns → section schema
@@ -247,7 +280,7 @@ def load_asset_prices() -> pd.DataFrame:
 
     # Some assets (xUSD) exist on multiple chains — deduplicate by
     # keeping one price per (asset, date), preferring chain_id=1 (Ethereum)
-    if "chain_id" in df.columns:
+    if "chain_id" in df.columns and "date" in df.columns:
         df = df.sort_values(["asset", "timestamp", "chain_id"])
         df = df.drop_duplicates(subset=["asset", "date"], keep="first")
 
@@ -259,12 +292,12 @@ def load_asset_prices() -> pd.DataFrame:
 
 @st.cache_data(ttl=3600)
 def load_net_flows() -> pd.DataFrame:
-    """Section expects: date, vault_name, tvl_usd, daily_flow_usd, daily_flow_pct"""
+    """
+    Source: block3_vault_net_flows.csv
+    Section expects: date, vault_name, tvl_usd, daily_flow_usd, daily_flow_pct
+    """
     df = _read("block3_vault_net_flows.csv")
     if df.empty:
-        df = _read("vault_net_flows.csv")
-        if "date" in df.columns:
-            df["date"] = pd.to_datetime(df["date"])
         return df
 
     rename = {
@@ -286,12 +319,12 @@ def load_net_flows() -> pd.DataFrame:
 
 @st.cache_data(ttl=3600)
 def load_utilization() -> pd.DataFrame:
-    """Section expects: timestamp, market, utilization"""
+    """
+    Source: block3_market_utilization_hourly.csv
+    Section expects: timestamp, market, utilization
+    """
     df = _read("block3_market_utilization_hourly.csv")
     if df.empty:
-        df = _read("market_utilization_hourly.csv")
-        if "timestamp" in df.columns:
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
         return df
 
     # Build market label
@@ -326,7 +359,6 @@ def load_utilization() -> pd.DataFrame:
             rows = []
             for i, row in grp.iterrows():
                 if i in gap_indices:
-                    # Insert a NaN row to break the line
                     gap_row = row.copy()
                     gap_row["utilization"] = None
                     gap_row["timestamp"] = row["timestamp"] - pd.Timedelta(seconds=1)
@@ -344,12 +376,13 @@ def load_utilization() -> pd.DataFrame:
 @st.cache_data(ttl=3600)
 def load_ltv() -> pd.DataFrame:
     """
+    Source: block5_ltv_analysis.csv
     Section expects: market, lltv_pct, oracle_ltv_pct, true_ltv_pct,
     borrow_usd, price_gap_pct, status, liquidations_count
     """
     df = _read("block5_ltv_analysis.csv")
     if df.empty:
-        return _read("ltv_analysis.csv")
+        return df
 
     # Build market label
     if "market" not in df.columns:
@@ -373,12 +406,13 @@ def load_ltv() -> pd.DataFrame:
 @st.cache_data(ttl=3600)
 def load_borrowers() -> pd.DataFrame:
     """
+    Source: block5_borrower_positions.csv
     Section expects: market, num_borrowers, total_borrow_usd,
     top_borrower_pct, concentration
     """
     df = _read("block5_borrower_positions.csv")
     if df.empty:
-        return _read("borrower_concentration.csv")
+        return df
 
     # Filter to actual borrowers
     if "position_type" in df.columns:
@@ -423,12 +457,13 @@ def load_borrowers() -> pd.DataFrame:
 @st.cache_data(ttl=3600)
 def load_bridges() -> pd.DataFrame:
     """
+    Source: block6_contagion_bridges.csv
     Section expects: vault_name, toxic_markets, toxic_exposure_usd,
     clean_markets, clean_exposure_usd, bridge_type
     """
     df = _read("block6_contagion_bridges.csv")
     if df.empty:
-        return _read("contagion_bridges.csv")
+        return df
 
     rename = {
         "n_toxic_markets": "toxic_markets",
@@ -448,10 +483,13 @@ def load_bridges() -> pd.DataFrame:
 
 @st.cache_data(ttl=3600)
 def load_exposure_summary() -> pd.DataFrame:
-    """Section expects: category, count"""
+    """
+    Source: block6_vault_allocation_summary.csv
+    Section expects: category, count
+    """
     df = _read("block6_vault_allocation_summary.csv")
     if df.empty:
-        return _read("exposure_summary.csv")
+        return df
 
     # Categorize vaults by toxic market count
     df["n_toxic_markets"] = pd.to_numeric(df.get("n_toxic_markets", 0), errors="coerce").fillna(0)
@@ -488,7 +526,10 @@ def load_exposure_summary() -> pd.DataFrame:
 
 @st.cache_data(ttl=3600)
 def load_timeline() -> pd.DataFrame:
-    """Section expects: date, event, category, severity — editorial data."""
+    """
+    Source: timeline_events.csv (editorial, hand-written — not generated)
+    Section expects: date, event, category, severity
+    """
     df = _read("timeline_events.csv")
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"])

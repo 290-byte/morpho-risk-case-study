@@ -17,7 +17,7 @@ def render():
 
     vaults = load_vaults()
     if vaults.empty:
-        st.warning("No vault data available.")
+        st.error("⚠️ Vault data not available — run the pipeline to generate `block1_vaults_graphql.csv`.")
         return
 
     # ── Key Metrics ─────────────────────────────────────────
@@ -125,6 +125,6 @@ def render():
     # ── Key Insight ─────────────────────────────────────────
     st.info(
         "**Key finding:** Response speed, not vault size, determined outcomes. "
-        "Gauntlet's $192M frontier vault exited 63 days before depeg with zero loss, "
-        "while Relend ($63K TVL) suffered 98.4% drawdown because it couldn't exit its position in time."
+        "Gauntlet's \\$192M frontier vault exited 63 days before depeg with zero loss, "
+        "while Relend (\\$63K TVL) suffered 98.4% drawdown because it couldn't exit its position in time."
     )

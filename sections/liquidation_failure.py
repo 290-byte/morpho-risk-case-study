@@ -18,6 +18,10 @@ def render():
     borrowers = load_borrowers()
     prices = load_asset_prices()
 
+    if ltv.empty and prices.empty:
+        st.error("⚠️ Data not available — run the pipeline to generate `block5_ltv_analysis.csv` and `block5_asset_prices.csv`.")
+        return
+
     # ── Key Metrics ─────────────────────────────────────────
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Liquidation Events", "0", help="Zero across all 18 markets")

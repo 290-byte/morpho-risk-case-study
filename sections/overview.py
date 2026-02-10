@@ -17,9 +17,13 @@ def render():
     markets = load_markets()
     vaults = load_vaults()
 
+    if markets.empty and vaults.empty:
+        st.error("⚠️ Core data not available — run the pipeline to generate `block1_markets_graphql.csv` and `block1_vaults_graphql.csv`.")
+        return
+
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Toxic Markets", f"{len(markets)}", help="Markets using xUSD, deUSD, or sdeUSD as collateral")
-    c2.metric("Affected Vaults", f"{len(vaults)}", help="Unique vaults with current or historical exposure")
+    c1.metric("Toxic Markets", f"{len(markets)}" if not markets.empty else "—", help="Markets using xUSD, deUSD, or sdeUSD as collateral")
+    c2.metric("Affected Vaults", f"{len(vaults)}" if not vaults.empty else "—", help="Unique vaults with current or historical exposure")
     c3.metric("Total Bad Debt", "$3.64M", delta="-$3.64M", delta_color="inverse")
     c4.metric("Chains Affected", "3", help="Ethereum, Arbitrum, Plume")
     c5.metric("Liquidation Events", "0", help="Oracle masking prevented liquidations")
@@ -30,7 +34,16 @@ def render():
     st.subheader("Token Price Collapse")
 
     prices = load_asset_prices()
-    if not prices.empty:
+    if prices.empty:
+        st.error("⚠️ Asset price data not available — run the pipeline to generate `block5_asset_prices.csv`.")
+    else:
+        # Check which assets are present
+        available_assets = set(prices["asset"].unique()) if "asset" in prices.columns else set()
+        expected_assets = {"xUSD", "deUSD", "sdeUSD"}
+        missing_assets = expected_assets - available_assets
+        if missing_assets:
+            st.warning(f"⚠️ Price data missing for: {', '.join(sorted(missing_assets))}. Only showing available assets.")
+
         fig = go.Figure()
         colors = {"xUSD": RED, "deUSD": "#f97316", "sdeUSD": "#eab308"}
         for asset in ["xUSD", "deUSD", "sdeUSD"]:

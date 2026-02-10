@@ -162,4 +162,8 @@ with st.sidebar:
     st.caption("Data: Morpho GraphQL API + on-chain")
     st.caption("Analysis date: Feb 8, 2026")
 
+    # Show warnings for any missing pipeline data files
+    from utils.data_loader import show_data_warnings
+    show_data_warnings()
+
 nav.run()

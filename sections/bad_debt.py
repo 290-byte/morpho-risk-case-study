@@ -10,11 +10,15 @@ from utils.charts import apply_layout, depeg_vline, RED, GREEN, BLUE, YELLOW, OR
 
 def render():
     st.title("Bad Debt Analysis")
-    st.caption("$3.64M in unrealized bad debt across 4 markets — plus share price damage to 2 vaults.")
+    st.caption("\\$3.64M in unrealized bad debt across 4 markets — plus share price damage to 2 vaults.")
 
     markets = load_markets()
     vaults = load_vaults()
     prices = load_share_prices()
+
+    if markets.empty:
+        st.error("⚠️ Market data not available — run the pipeline to generate `block1_markets_graphql.csv`.")
+        return
 
     # ── Key Metrics ─────────────────────────────────────────
     total_bad_debt = markets["bad_debt_usd"].sum()
@@ -59,7 +63,9 @@ def render():
         # Compute haircut from daily prices, grouped by vault_address to avoid
         # mixing cross-chain data (block2 daily has both ETH + ARB rows for same name)
         damaged_info = []
-        if not prices.empty:
+        if prices.empty:
+            st.error("⚠️ Share price data not available — run the pipeline to generate `block2_share_prices_daily.csv`.")
+        else:
             # Determine grouping key: vault_address (unique per chain) > vault_name
             group_key = "vault_address" if "vault_address" in prices.columns else "vault_name"
 
@@ -166,7 +172,9 @@ def render():
 
                 st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No vaults with significant share price drawdowns detected.")
+            if not prices.empty:
+                st.info("No vaults with significant share price drawdowns (>1%) detected in the data.")
+            # If prices is empty, the error message was already shown above
 
     with tab2:
         st.markdown("These vaults maintained stable share prices — proactive curator exits protected depositors.")
@@ -222,4 +230,4 @@ def render():
         with st.container(border=True):
             st.markdown("**Layer 3: Oracle vs Spot**")
             st.metric("Markets Mispriced (>5%)", "0 detected")
-            st.caption("Paradoxically zero — because oracles are hardcoded at ≈$1.00, masking the real gap.")
+            st.caption("Paradoxically zero — because oracles are hardcoded at ≈\\$1.00, masking the real gap.")

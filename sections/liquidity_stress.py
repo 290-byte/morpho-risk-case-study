@@ -17,6 +17,10 @@ def render():
     utilization = load_utilization()
     net_flows = load_net_flows()
 
+    if utilization.empty and net_flows.empty:
+        st.error("⚠️ Data not available — run the pipeline to generate `block3_market_utilization_hourly.csv` and `block3_vault_net_flows.csv`.")
+        return
+
     # ── Key Metrics ─────────────────────────────────────────
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Markets at 100% Util", "6", help="Markets with zero available liquidity")
@@ -57,6 +61,9 @@ def render():
     st.subheader("Vault TVL During Stress Period")
 
     if not net_flows.empty:
+        # Filter out test/invalid vault names
+        net_flows = net_flows[~net_flows["vault_name"].str.contains("Duplicated Key", case=False, na=False)]
+
         tab1, tab2 = st.tabs(["TVL Trajectories", "Daily Net Flows"])
 
         with tab1:

@@ -18,6 +18,10 @@ def render():
     exposure = load_exposure_summary()
     vaults = load_vaults()
 
+    if bridges.empty and exposure.empty:
+        st.error("⚠️ Data not available — run the pipeline to generate `block6_contagion_bridges.csv` and `block6_vault_allocation_summary.csv`.")
+        return
+
     # ── Key Metrics ─────────────────────────────────────────
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Exposures", "200", help="Vault-market pairs touching toxic collateral")
