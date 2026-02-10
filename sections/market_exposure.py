@@ -8,7 +8,7 @@ from utils.charts import apply_layout, donut_chart, RED, GREEN, YELLOW, ORANGE, 
 
 
 def render():
-    st.title("🎯 Market Exposure")
+    st.title("Market Exposure")
     st.caption("18 markets using xUSD, deUSD, or sdeUSD as collateral — discovered across 3,133 total Morpho markets.")
 
     markets = load_markets()

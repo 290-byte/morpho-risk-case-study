@@ -1,57 +1,80 @@
-# Query Methodology
+# Query Pipeline
+
+## Architecture
+
+```
+runner.py              ← Orchestrator: patches paths + runs blocks in order
+test_block.py          ← CLI: run & inspect a single block locally
+fetch_dex_prices.py    ← GeckoTerminal DEX prices (supplemental)
+
+block1_query_markets_graphql.py    ← Scan all chains for toxic markets
+block1_query_vaults_graphql.py     ← 3-phase vault discovery
+block2_query_bad_debt_markets.py   ← Per-market bad debt quantification
+block2_query_share_prices.py       ← Daily + hourly vault share prices
+block3_curator_response.py         ← Allocation timeseries + classification
+block3b_liquidity_stress.py        ← Utilization + vault net flows
+block5_liquidation_breakdown.py    ← Oracle configs, borrowers, LTV analysis
+block6_contagion_analysis.py       ← Cross-market exposure + contagion bridges
+```
+
+## Dependency Chain
+
+```
+block1_markets ──→ block1_vaults ──→ block2_share_prices
+       │                  │              ↓
+       │                  ├──→ block3_curator
+       │                  │              ↓
+       ├──→ block2_bad_debt   block3b_liquidity (needs block2 + block3)
+       ├──→ block5_liquidation
+       └──→ block6_contagion (also needs Dune CSVs — optional)
+```
+
+## Running Locally
+
+```bash
+# Full pipeline (all blocks in order)
+python queries/runner.py
+
+# Single block with output inspection
+python queries/test_block.py block1_markets --inspect
+
+# Run from a specific block onwards
+python queries/runner.py --from block2_bad_debt
+
+# Skip blocks whose inputs are missing
+python queries/runner.py --skip-missing
+
+# Custom data directory
+python queries/runner.py --data-dir ./test_data
+
+# List all blocks
+python queries/runner.py --list
+
+# Fetch DEX prices (separate, no API key needed)
+python queries/fetch_dex_prices.py
+```
+
+## How the Runner Works
+
+The original scripts all use `PROJECT_ROOT / "04-data-exports/raw/graphql/"` for I/O.
+The runner:
+
+1. Creates a `data/_workspace/04-data-exports/raw/graphql/` mirrored directory
+2. Copies existing CSVs from `data/` into it
+3. Monkey-patches `PROJECT_ROOT` in each block module
+4. Calls `main()`
+5. Syncs output CSVs back to `data/` (flat)
+
+This means **zero changes to the original query scripts** — they run exactly as-is.
+
+## From Streamlit
+
+The dashboard has a **⚙️ Data Management** page that:
+- Shows current CSV status (rows, freshness)
+- Lets you select and run blocks via the Streamlit UI
+- Clears `@st.cache_data` after refresh so charts update
 
 ## Data Source
 
-All data was collected from the **Morpho GraphQL API** at `https://blue-api.morpho.org/graphql`.
-
-This is Morpho's official read-only API that provides access to markets, vaults, positions, allocations, events, and on-chain state across all supported chains.
-
-## Query Strategy
-
-| Block | Query | Output | Method |
-|-------|-------|--------|--------|
-| 1.1 | Toxic market discovery | `markets.csv` | Scan all 3,133 markets across 8 chains, filter for xUSD/deUSD/sdeUSD collateral |
-| 1.2 | Vault exposure mapping | `vaults.csv` | 3-phase discovery: current positions → reallocation history → individual vault fetch |
-| 2.1 | Share price history | `share_prices_daily.csv` | Daily + hourly share prices for all 33 vaults (Sep 2025 – Jan 2026) |
-| 2.2 | Bad debt quantification | `markets.csv` (bad_debt columns) | Protocol-level bad debt from market state + supply/borrow gaps |
-| 3.1 | Curator response | `vaults.csv` (response columns) | Classify based on reallocation timing vs Nov 4 depeg date |
-| 3.2 | Market utilization | `market_utilization_hourly.csv` | Hourly utilization rates during Nov 1–15 stress period |
-| 3.3 | Vault net flows | `vault_net_flows.csv` | Daily TVL changes during stress period |
-| 5.1 | Oracle configs | `ltv_analysis.csv` | Oracle type, LLTV thresholds, oracle vs true LTV |
-| 5.2 | Asset prices | `asset_prices.csv` | xUSD, deUSD, sdeUSD market prices (Oct–Dec 2025) |
-| 5.3 | Borrower positions | `borrower_concentration.csv` | Active borrower analysis per market |
-| 6.1 | Vault multi-exposure | `exposure_summary.csv` | Cross-market exposure mapping for all affected vaults |
-| 6.2 | Contagion bridges | `contagion_bridges.csv` | Vaults that bridge toxic ↔ clean markets |
-
-## Key Design Decisions
-
-**GraphQL over Dune:** We used Morpho's GraphQL API rather than Dune Analytics because:
-1. Real-time data (not dependent on indexer lag)
-2. Direct access to protocol-internal fields (share prices, bad debt accounting)
-3. Cross-chain coverage (Ethereum, Arbitrum, Plume) from a single endpoint
-4. No SQL query limits or rate concerns for comprehensive scans
-
-**3-Phase Vault Discovery:** Simple current-position queries miss vaults that already exited. Our 3-phase approach (current → reallocation history → individual fetch) found 20 additional vaults that a naive query would have missed.
-
-**Oracle-Independent Analysis:** We calculated bad debt three ways (supply gap, protocol accounting, oracle vs spot) to avoid relying solely on potentially stale oracle data.
-
-## API Access
-
-The Morpho GraphQL API is publicly accessible — no API key required:
-```bash
-curl -X POST https://blue-api.morpho.org/graphql \
-  -H "Content-Type: application/json" \
-  -d '{"query": "{ markets(first: 5) { items { uniqueKey loanAsset { symbol } collateralAsset { symbol } } } }"}'
-```
-
-## Running Queries
-
-```bash
-# Install dependencies
-pip install requests pandas
-
-# Run all queries and regenerate CSVs
-python run_all.py
-```
-
-Note: Full query execution takes ~10 minutes due to pagination across 3,133 markets and 33 vaults.
+All data from the **Morpho GraphQL API** at `https://blue-api.morpho.org/graphql`.
+Public access, no API key required.

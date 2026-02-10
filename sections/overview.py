@@ -7,7 +7,7 @@ from utils.charts import apply_layout, SEVERITY_COLORS, RED, GREEN, BLUE, format
 
 
 def render():
-    st.title("📋 Overview — xUSD / deUSD Depeg Event")
+    st.title("Overview — xUSD / deUSD Depeg Event")
     st.caption(
         "November 2025: A stablecoin depeg cascaded through Morpho Blue markets, "
         "exposing $4.2M in toxic collateral across 18 markets and 33 vaults on 3 chains."
@@ -40,6 +40,7 @@ def render():
                 y=prices.loc[mask, "price_usd"],
                 name=asset,
                 line=dict(color=colors.get(asset, BLUE), width=2),
+                connectgaps=False,
                 hovertemplate="%{x}<br>%{y:$.4f}<extra>" + asset + "</extra>",
             ))
 
@@ -50,7 +51,18 @@ def render():
         fig.add_vline(x=pd.Timestamp("2025-11-06"), line_dash="dot", line_color="#f97316", opacity=0.5)
         fig.add_annotation(x=pd.Timestamp("2025-11-06"), y=0, yref="paper", text="deUSD Sunset",
                            showarrow=False, font=dict(size=10, color="#f97316"), yshift=-10)
-        fig = apply_layout(fig, title="xUSD, deUSD & sdeUSD Price (USD)", height=420)
+        fig = apply_layout(fig, title="xUSD, deUSD & sdeUSD Price (USD)", height=480)
+        fig.update_layout(
+            margin=dict(t=50, b=60, l=50, r=20),
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.12,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=12),
+            ),
+        )
         fig.update_yaxes(tickformat="$.2f", range=[0, 1.2])
         st.plotly_chart(fig, use_container_width=True)
 
@@ -59,26 +71,23 @@ def render():
 
     timeline = load_timeline()
     if not timeline.empty:
-        fig = go.Figure()
-        for _, row in timeline.iterrows():
-            color = SEVERITY_COLORS.get(row["severity"], BLUE)
-            fig.add_trace(go.Scatter(
-                x=[row["date"]],
-                y=[row["category"]],
-                mode="markers+text",
-                marker=dict(size=14, color=color, symbol="diamond"),
-                text=[row["event"][:50] + "..." if len(row["event"]) > 50 else row["event"]],
-                textposition="middle right",
-                textfont=dict(size=9, color=color),
-                showlegend=False,
-                hovertext=row["event"],
-                hoverinfo="text",
-            ))
+        timeline = timeline.sort_values("date").reset_index(drop=True)
 
-        fig = apply_layout(fig, height=450)
-        fig.update_xaxes(title="Date", range=["2025-08-20", "2025-12-20"])
-        fig.update_yaxes(title="")
-        st.plotly_chart(fig, use_container_width=True)
+        dot_map = {
+            "critical": "🔴",
+            "warning": "🟠",
+            "positive": "🟢",
+            "info": "🔵",
+        }
+
+        for _, row in timeline.iterrows():
+            dot = dot_map.get(row.get("severity", "info"), "⚪")
+            date_str = str(row["date"])[:10]
+            event_text = row["event"]
+            category = row.get("category", "").replace("_", " ")
+            st.markdown(f"**{date_str}** &nbsp; {dot} &nbsp; {event_text}")
+            st.caption(category)
+            st.markdown("")
 
     # ── Exposure Breakdown ──────────────────────────────────
     st.subheader("Exposure Breakdown")

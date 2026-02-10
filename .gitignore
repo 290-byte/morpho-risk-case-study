@@ -8,3 +8,11 @@ dist/
 build/
 .DS_Store
 *.log
+data/_workspace/
+# Docker (local testing only — not for Streamlit Cloud)
+Dockerfile
+docker-compose.yml
+dev.sh
+morpho-risk-case-study.tar.gz
+morpho-risk-case-study1.tar.gz
+data/*.*

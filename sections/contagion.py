@@ -8,7 +8,7 @@ from utils.charts import apply_layout, donut_chart, RED, BLUE, ORANGE, GREEN, YE
 
 
 def render():
-    st.title("🕸️ Contagion Assessment")
+    st.title("Contagion Assessment")
     st.caption(
         "200 vault-market exposure pairs, 28 vaults with multi-market exposure, "
         "and 4 contagion bridges where toxic and clean markets share the same vault."

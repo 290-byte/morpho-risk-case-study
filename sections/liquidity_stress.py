@@ -8,7 +8,7 @@ from utils.charts import apply_layout, depeg_vline, RED, BLUE, ORANGE, GREEN, fo
 
 
 def render():
-    st.title("📉 Liquidity Stress Test")
+    st.title("Liquidity Stress Test")
     st.caption(
         "Nov 1–15 stress period: utilization spiked to 100% across 6 markets, "
         "while vault TVLs collapsed as depositors rushed to withdraw."
@@ -39,15 +39,16 @@ def render():
 
         mask = utilization["market"].isin(market_filter)
         fig = px.line(utilization[mask], x="timestamp", y="utilization", color="market")
+        fig.update_traces(connectgaps=False)
         fig = apply_layout(fig, height=400)
         fig = depeg_vline(fig)
         fig.update_yaxes(title="Utilization", tickformat=".0%", range=[0, 1.1])
         fig.update_xaxes(title="")
         
         # Add 100% reference line
-        fig.add_hline(y=1.0, line_dash="dot", line_color="rgba(255,255,255,0.2)")
+        fig.add_hline(y=1.0, line_dash="dot", line_color="rgba(0,0,0,0.15)")
         fig.add_annotation(x=1, xref="paper", y=1.0, text="100%",
-                           showarrow=False, font=dict(size=10, color="rgba(255,255,255,0.4)"), xshift=10)
+                           showarrow=False, font=dict(size=10, color="rgba(0,0,0,0.35)"), xshift=10)
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
@@ -59,15 +60,16 @@ def render():
         tab1, tab2 = st.tabs(["TVL Trajectories", "Daily Net Flows"])
 
         with tab1:
+            all_vaults = net_flows["vault_name"].unique().tolist()
             vault_filter = st.multiselect(
                 "Select vaults:",
-                net_flows["vault_name"].unique().tolist(),
-                default=["MEV Capital USDC (ETH)", "Relend USDC", "Smokehouse USDC",
-                         "Gauntlet USDC Frontier", "Gauntlet USDC Core"],
+                all_vaults,
+                default=all_vaults[:5],
                 key="tvl_filter",
             )
             mask = net_flows["vault_name"].isin(vault_filter)
             fig = px.line(net_flows[mask], x="date", y="tvl_usd", color="vault_name")
+            fig.update_traces(connectgaps=False)
             fig = apply_layout(fig, height=420)
             fig = depeg_vline(fig)
             fig.update_yaxes(title="TVL (USD)", tickformat="$,.0f")

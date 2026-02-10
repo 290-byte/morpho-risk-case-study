@@ -8,7 +8,7 @@ from utils.charts import apply_layout, depeg_vline, RED, BLUE, ORANGE, GREEN, YE
 
 
 def render():
-    st.title("⚡ Liquidation Failure Analysis")
+    st.title("Liquidation Failure Analysis")
     st.caption(
         "Zero liquidations occurred despite 95–99% collateral value collapse. "
         "Hardcoded Chainlink oracles continued reporting ≈$1.00, completely masking the true risk."
@@ -41,6 +41,7 @@ def render():
                 x=xusd["timestamp"], y=xusd["price_usd"],
                 name="Market Price (DEX)",
                 line=dict(color=RED, width=2),
+                connectgaps=False,
             ))
             
             # Oracle price (hardcoded ~$1)
@@ -76,26 +77,49 @@ def render():
     st.subheader("LTV Analysis — Why Liquidations Failed")
 
     if not ltv.empty:
+        # Select and rename columns for clean display
+        display_cols = []
+        if "market" in ltv.columns:
+            display_cols.append("market")
+        for c in ["oracle_mechanism", "collateral_spot_price", "lltv_pct",
+                   "oracle_ltv_pct", "true_ltv_pct", "price_gap_pct",
+                   "borrow_usd", "liquidation_status", "liquidations_count"]:
+            if c in ltv.columns:
+                display_cols.append(c)
+
+        ltv_display = ltv[display_cols].copy()
+
+        # Cap 9999 to readable text
+        for col in ["oracle_ltv_pct", "true_ltv_pct"]:
+            if col in ltv_display.columns:
+                ltv_display[col] = ltv_display[col].apply(
+                    lambda x: x if x < 9000 else None
+                )
+
         st.dataframe(
-            ltv,
+            ltv_display,
             column_config={
                 "market": "Market",
+                "oracle_mechanism": "Oracle Type",
+                "collateral_spot_price": st.column_config.NumberColumn("Spot Price", format="$%.4f"),
                 "lltv_pct": st.column_config.NumberColumn("LLTV", format="%.1f%%"),
-                "oracle_ltv_pct": st.column_config.NumberColumn("Oracle LTV", format="%,.0f%%"),
-                "true_ltv_pct": st.column_config.NumberColumn("True LTV", format="%,.0f%%"),
-                "borrow_usd": st.column_config.NumberColumn("Borrow Value", format="$%,.0f"),
+                "oracle_ltv_pct": st.column_config.NumberColumn("Oracle LTV", format="%.1f%%"),
+                "true_ltv_pct": st.column_config.NumberColumn("True LTV", format="%.1f%%"),
                 "price_gap_pct": st.column_config.NumberColumn("Price Gap", format="%.1f%%"),
-                "status": "Status",
+                "borrow_usd": st.column_config.NumberColumn("Borrow Value", format="$%,.0f"),
+                "liquidation_status": "Status",
                 "liquidations_count": st.column_config.NumberColumn("Liquidations", format="%d"),
             },
             hide_index=True,
             use_container_width=True,
         )
 
-        st.warning(
-            "**Oracle LTV = 9999%** means collateral value per the oracle exceeds borrow value, "
-            "so the protocol sees no reason to liquidate. In reality, collateral is worth ~$0, "
-            "so True LTV is also effectively infinite — but pointed the wrong way."
+        st.info(
+            "**Why Oracle LTV shows as empty for some markets:** "
+            "LTV = Borrow Value / Collateral Value. When the oracle still reports collateral near $1 "
+            "but real market price is ~$0, the oracle-computed LTV stays extremely low — the protocol "
+            "thinks positions are healthy. Meanwhile, using real spot prices, these positions are deeply "
+            "underwater. This gap between oracle and reality is exactly why no liquidations fired."
         )
 
     # ── Mechanism Explanation ────────────────────────────────
@@ -107,20 +131,32 @@ def render():
     with col1:
         with st.container(border=True):
             st.markdown("**1. Normal Operation**")
-            st.markdown("Oracle price ≈ $1.00  \nMarket price ≈ $1.00  \nLTV < LLTV ✅")
-            st.caption("Liquidation engine sleeps — everything looks healthy.")
+            st.markdown(
+                "Oracle price = $1.00\n\n"
+                "Market price = $1.00\n\n"
+                "LTV < LLTV → positions healthy"
+            )
+            st.caption("Both prices agree. No liquidations needed.")
 
     with col2:
         with st.container(border=True):
             st.markdown("**2. Depeg Occurs**")
-            st.markdown("Oracle price ≈ $1.00  \nMarket price → $0.05  \nOracle LTV still < LLTV ✅")
-            st.caption("Liquidation engine STILL sleeps — oracle says no problem.")
+            st.markdown(
+                "Oracle price = $1.00 (unchanged)\n\n"
+                "Market price → $0.05\n\n"
+                "Oracle LTV still < LLTV"
+            )
+            st.caption("Oracle doesn't see the crash. Protocol thinks everything is fine.")
 
     with col3:
         with st.container(border=True):
-            st.markdown("**3. Result**")
-            st.markdown("No liquidations fire  \nBad debt accumulates  \nVault depositors absorb losses")
-            st.caption("The safety mechanism (liquidation) was completely disabled.")
+            st.markdown("**3. Consequence**")
+            st.markdown(
+                "Zero liquidations fire\n\n"
+                "Bad debt accumulates silently\n\n"
+                "Vault depositors absorb all losses"
+            )
+            st.caption("The liquidation safety net was completely bypassed by stale oracle data.")
 
     # ── Borrower Concentration ──────────────────────────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)

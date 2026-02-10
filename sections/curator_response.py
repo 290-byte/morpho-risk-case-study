@@ -9,7 +9,7 @@ from utils.charts import apply_layout, RESPONSE_COLORS, RED, GREEN, BLUE, YELLOW
 
 
 def render():
-    st.title("🏷️ Curator Response Analysis")
+    st.title("Curator Response Analysis")
     st.caption(
         "15 vaults exited proactively (weeks before depeg), 3 reacted early, "
         "1 was slow, and 7 never properly exited — response speed was the #1 predictor of outcome."
