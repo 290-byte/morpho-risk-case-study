@@ -31,26 +31,27 @@ from pathlib import Path
 # Dashboard reads from data/ — the runner syncs pipeline outputs here.
 DATA_DIR = Path(__file__).parent.parent / "data"
 
-# Track which files are missing so sections can show warnings
-_missing_files: list = []
-
-
+# All block files the dashboard expects
+_EXPECTED_FILES = [
+    "block1_markets_graphql.csv",
+    "block1_vaults_graphql.csv",
+    "block2_share_prices_daily.csv",
+    "block2_share_price_summary.csv",
+    "block3_curator_profiles.csv",
+    "block5_asset_prices.csv",
+]
 # ── helpers ─────────────────────────────────────────────────────
 
 def _read(filename: str) -> pd.DataFrame:
     """Read CSV from data dir, return empty DataFrame if missing."""
     path = DATA_DIR / filename
     if not path.exists():
-        if filename not in _missing_files:
-            _missing_files.append(filename)
         return pd.DataFrame()
     df = pd.read_csv(path)
     # Normalize: some block scripts use "blockchain", others use "chain"
     if "blockchain" in df.columns and "chain" not in df.columns:
         df = df.rename(columns={"blockchain": "chain"})
     return df
-
-
 def _market_label(row) -> str:
     """Build a short human-readable market label."""
     collat = row.get("collateral_symbol", row.get("collateral", "?"))
@@ -58,22 +59,17 @@ def _market_label(row) -> str:
     chain = row.get("chain", "")
     short_chain = str(chain)[:3].title() if chain else ""
     return f"{collat}/{loan} ({short_chain})"
-
-
 def show_data_warnings():
-    """Call from app.py to display any missing data warnings."""
-    if _missing_files:
+    """Call from app.py to display any missing data warnings. Checks fresh each time."""
+    missing = [f for f in _EXPECTED_FILES if not (DATA_DIR / f).exists()]
+    if missing:
         st.sidebar.warning(
-            f"⚠️ Missing data files: {', '.join(_missing_files)}. "
+            f"⚠️ Missing data files: {', '.join(missing)}. "
             "Run the query pipeline to generate them."
         )
-
-
 # ═══════════════════════════════════════════════════════════════
 #  LOADERS — one per logical dataset the sections consume
 # ═══════════════════════════════════════════════════════════════
-
-@st.cache_data(ttl=3600)
 def load_markets() -> pd.DataFrame:
     """
     Source: block1_markets_graphql.csv
@@ -129,8 +125,6 @@ def load_markets() -> pd.DataFrame:
 
     return df
 
-
-@st.cache_data(ttl=3600)
 def load_vaults() -> pd.DataFrame:
     """
     Source: block1_vaults_graphql.csv + block3_curator_profiles.csv + block2_share_price_summary.csv
@@ -240,8 +234,6 @@ def load_vaults() -> pd.DataFrame:
 
     return df
 
-
-@st.cache_data(ttl=3600)
 def load_share_prices() -> pd.DataFrame:
     """
     Source: block2_share_prices_daily.csv
@@ -256,8 +248,6 @@ def load_share_prices() -> pd.DataFrame:
         df["share_price"] = pd.to_numeric(df["share_price"], errors="coerce")
     return df
 
-
-@st.cache_data(ttl=3600)
 def load_asset_prices() -> pd.DataFrame:
     """
     Source: block5_asset_prices.csv
@@ -290,8 +280,6 @@ def load_asset_prices() -> pd.DataFrame:
 
     return df
 
-
-@st.cache_data(ttl=3600)
 def load_net_flows() -> pd.DataFrame:
     """
     Source: block3_vault_net_flows.csv
@@ -317,8 +305,6 @@ def load_net_flows() -> pd.DataFrame:
 
     return df
 
-
-@st.cache_data(ttl=3600)
 def load_utilization() -> pd.DataFrame:
     """
     Source: block3_market_utilization_hourly.csv
@@ -373,8 +359,6 @@ def load_utilization() -> pd.DataFrame:
 
     return df
 
-
-@st.cache_data(ttl=3600)
 def load_ltv() -> pd.DataFrame:
     """
     Source: block5_ltv_analysis.csv
@@ -403,8 +387,6 @@ def load_ltv() -> pd.DataFrame:
 
     return df
 
-
-@st.cache_data(ttl=3600)
 def load_borrowers() -> pd.DataFrame:
     """
     Source: block5_borrower_positions.csv
@@ -454,8 +436,6 @@ def load_borrowers() -> pd.DataFrame:
 
     return pd.DataFrame(groups)
 
-
-@st.cache_data(ttl=3600)
 def load_bridges() -> pd.DataFrame:
     """
     Source: block6_contagion_bridges.csv
@@ -481,8 +461,6 @@ def load_bridges() -> pd.DataFrame:
 
     return df
 
-
-@st.cache_data(ttl=3600)
 def load_exposure_summary() -> pd.DataFrame:
     """
     Source: block6_vault_allocation_summary.csv
@@ -524,8 +502,6 @@ def load_exposure_summary() -> pd.DataFrame:
         for k, v in categories.items() if v > 0
     ])
 
-
-@st.cache_data(ttl=3600)
 def load_timeline() -> pd.DataFrame:
     """
     Source: timeline_events.csv (editorial, hand-written — not generated)
@@ -535,11 +511,7 @@ def load_timeline() -> pd.DataFrame:
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"])
     return df
-
-
 # ── Generic loader (for admin page / ad-hoc use) ────────────
-
-@st.cache_data(ttl=3600)
 def load_csv(filename: str) -> pd.DataFrame:
     """Load any CSV from the data directory with caching."""
     return _read(filename)
