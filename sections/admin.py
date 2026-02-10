@@ -13,6 +13,8 @@ QUERIES_DIR = Path(__file__).parent.parent / "queries"
 
 def get_csv_status() -> list:
     """Check which CSVs exist and their freshness."""
+    if not DATA_DIR.exists():
+        return []
     files = sorted(DATA_DIR.glob("*.csv"))
     rows = []
     for f in files:
@@ -66,10 +68,11 @@ def render():
     2. **Vaults** — 3-phase discovery (current + historical + individual)
     3. **Bad Debt** — Per-market quantification
     4. **Share Prices** — Daily + hourly for all vaults
-    5. **Curator Response** — Allocation timeseries + classification
-    6. **Liquidity Stress** — Utilization + net flows
-    7. **Liquidation** — Oracle configs, borrowers, LTV
-    8. **Contagion** — Cross-market exposure mapping
+    5. **Curator Response A** — Allocation timeseries + admin events
+    6. **Curator Response B** — Reallocations + classification (needs 5)
+    7. **Liquidity Stress** — Utilization + net flows
+    8. **Liquidation** — Oracle configs, borrowers, LTV
+    9. **Contagion** — Cross-market exposure mapping
     """)
 
     blocks = [
@@ -77,7 +80,8 @@ def render():
         ("block1_vaults", "Block 1: Vaults (3-phase discovery)"),
         ("block2_bad_debt", "Block 2: Bad Debt (per-market)"),
         ("block2_share_prices", "Block 2: Share Prices (daily + hourly)"),
-        ("block3_curator", "Block 3: Curator Response"),
+        ("block3_curator_A", "Block 3A: Curator Allocations + Admin Events"),
+        ("block3_curator_B", "Block 3B: Curator Reallocations + Classification"),
         ("block3b_liquidity", "Block 3b: Liquidity Stress"),
         ("block5_liquidation", "Block 5: Liquidation Breakdown"),
         ("block6_contagion", "Block 6: Contagion Analysis"),

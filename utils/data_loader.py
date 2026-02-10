@@ -28,6 +28,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
+# Dashboard reads from data/ — the runner syncs pipeline outputs here.
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 # Track which files are missing so sections can show warnings

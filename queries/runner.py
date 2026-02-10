@@ -76,16 +76,29 @@ BLOCKS = [
         "inputs": ["block1_vaults_graphql.csv"],
     },
     {
-        "name": "block3_curator",
-        "module": "block3_curator_response",
-        "description": "Curator allocation timeseries + response classification",
+        "name": "block3_curator_A",
+        "module": "block3_curator_response_A",
+        "description": "Curator allocation timeseries + admin events (Part A)",
         "outputs": [
             "block3_allocation_timeseries.csv",
             "block3_admin_events.csv",
+        ],
+        "inputs": ["block1_vaults_graphql.csv", "block1_markets_graphql.csv"],
+    },
+    {
+        "name": "block3_curator_B",
+        "module": "block3_curator_response_B",
+        "description": "Curator reallocations + classification (Part B)",
+        "outputs": [
             "block3_reallocations.csv",
             "block3_curator_profiles.csv",
         ],
-        "inputs": ["block1_vaults_graphql.csv", "block1_markets_graphql.csv"],
+        "inputs": [
+            "block1_vaults_graphql.csv",
+            "block1_markets_graphql.csv",
+            "block3_allocation_timeseries.csv",
+            "block3_admin_events.csv",
+        ],
     },
     {
         "name": "block3b_liquidity",
@@ -140,9 +153,9 @@ def setup_workspace(data_dir: Path) -> Path:
     """
     Create the directory structure the scripts expect.
     Returns the 'fake' PROJECT_ROOT that will be patched into each module.
-    
+
     Scripts expect: PROJECT_ROOT / 04-data-exports / raw / graphql / <file>.csv
-    We create:      data_dir / _workspace / 04-data-exports / raw / graphql/ → symlink to data_dir
+    We create:      data_dir / _workspace / 04-data-exports / raw / graphql/
     """
     workspace = data_dir / "_workspace"
     gql_path = workspace / GQL_SUBDIR
