@@ -166,4 +166,10 @@ with st.sidebar:
     from utils.data_loader import show_data_warnings
     show_data_warnings()
 
+# -- Snapshot (remove for production) --------------------------------
+try:
+    from utils.snapshot import write_snapshot; write_snapshot()
+except Exception:
+    pass  # snapshot is non-critical
+
 nav.run()

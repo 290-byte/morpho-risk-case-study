@@ -10,7 +10,7 @@ from datetime import datetime
 
 # Load .env from project root
 # Script lives at: 03-queries/block1-exposure/graphsql/script.py → 4 levels to /app/
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 env_path = PROJECT_ROOT / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -177,7 +177,7 @@ def discover_toxic_markets() -> Dict[str, Dict]:
     or discover them via inline GraphQL query if CSV not available.
     Returns dict: { uniqueKey: { chain_id, chain, collateral_symbol, loan_symbol } }
     """
-    markets_csv = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql" / "block1_markets_graphql.csv"
+    markets_csv = PROJECT_ROOT / "data" / "block1_markets_graphql.csv"
 
     if markets_csv.exists():
         df = pd.read_csv(markets_csv)
@@ -868,7 +868,7 @@ def main():
     df = df.sort_values(['supply_assets_usd', 'vault_total_assets_usd'], ascending=[False, False])
 
     # Save output
-    output_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
+    output_dir = PROJECT_ROOT / "data"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "block1_vaults_graphql.csv"
 

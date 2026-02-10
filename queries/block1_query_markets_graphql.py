@@ -8,7 +8,7 @@ from typing import List, Dict
 
 # Load .env from project root
 # Script lives at: 03-queries/block1-exposure/graphsql/script.py → 4 levels to /app/
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 env_path = PROJECT_ROOT / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -451,7 +451,7 @@ def main():
     df = df.sort_values('total_collat_usd', ascending=False)
 
     # Save output
-    output_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
+    output_dir = PROJECT_ROOT / "data"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "block1_markets_graphql.csv"
 

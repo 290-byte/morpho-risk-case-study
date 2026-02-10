@@ -68,11 +68,12 @@ def render():
     2. **Vaults** — 3-phase discovery (current + historical + individual)
     3. **Bad Debt** — Per-market quantification
     4. **Share Prices** — Daily + hourly for all vaults
-    5. **Curator Response A** — Allocation timeseries + admin events
-    6. **Curator Response B** — Reallocations + classification (needs 5)
-    7. **Liquidity Stress** — Utilization + net flows
-    8. **Liquidation** — Oracle configs, borrowers, LTV
-    9. **Contagion** — Cross-market exposure mapping
+    5. **Curator A1** — Allocation timeseries
+    6. **Curator A2** — Admin events (cap sets, queue changes)
+    7. **Curator B** — Reallocations + classification (needs A1 + A2)
+    8. **Liquidity Stress** — Utilization + net flows
+    9. **Liquidation** — Oracle configs, borrowers, LTV
+    10. **Contagion** — Cross-market exposure mapping
     """)
 
     blocks = [
@@ -80,7 +81,8 @@ def render():
         ("block1_vaults", "Block 1: Vaults (3-phase discovery)"),
         ("block2_bad_debt", "Block 2: Bad Debt (per-market)"),
         ("block2_share_prices", "Block 2: Share Prices (daily + hourly)"),
-        ("block3_curator_A", "Block 3A: Curator Allocations + Admin Events"),
+        ("block3_curator_A1", "Block 3A1: Curator Allocation Timeseries"),
+        ("block3_curator_A2", "Block 3A2: Curator Admin Events"),
         ("block3_curator_B", "Block 3B: Curator Reallocations + Classification"),
         ("block3b_liquidity", "Block 3b: Liquidity Stress"),
         ("block5_liquidation", "Block 5: Liquidation Breakdown"),
@@ -113,7 +115,6 @@ def render():
 
         cmd = [
             sys.executable, str(runner_path),
-            "--data-dir", str(DATA_DIR),
         ]
         if skip_missing:
             cmd.append("--skip-missing")
@@ -128,7 +129,6 @@ def render():
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=600,
                     cwd=str(QUERIES_DIR.parent),
                 )
 
@@ -145,9 +145,6 @@ def render():
                     status.update(label="Pipeline failed", state="error")
                     st.error(f"Exit code: {process.returncode}")
 
-            except subprocess.TimeoutExpired:
-                status.update(label="Pipeline timed out", state="error")
-                st.error("Pipeline exceeded 10-minute timeout. Try running individual blocks.")
             except Exception as e:
                 status.update(label="Error", state="error")
                 st.error(f"Failed to run pipeline: {e}")

@@ -196,10 +196,15 @@ def load_vaults() -> pd.DataFrame:
         }
         df = df.rename(columns={k: v for k, v in col_rename.items() if k in df.columns})
 
-    # ── Merge share price summary (drawdown) ─────────────────
+    # ── Merge share price summary (drawdown + peak/trough TVL) ─
     sp_summary = _read("block2_share_price_summary.csv")
     if not sp_summary.empty and "max_drawdown_pct" in sp_summary.columns:
-        sp = sp_summary[["vault_address", "max_drawdown_pct"]].drop_duplicates("vault_address")
+        sp_cols = ["vault_address", "max_drawdown_pct"]
+        # Also grab peak/trough/pre-depeg TVL if available
+        for extra in ["tvl_at_peak_usd", "tvl_at_trough_usd", "tvl_pre_depeg_usd"]:
+            if extra in sp_summary.columns:
+                sp_cols.append(extra)
+        sp = sp_summary[sp_cols].drop_duplicates("vault_address")
         sp["vault_address"] = sp["vault_address"].str.lower()
         sp = sp.rename(columns={"max_drawdown_pct": "share_price_drawdown"})
         df = df.merge(sp, on="vault_address", how="left")
@@ -211,6 +216,9 @@ def load_vaults() -> pd.DataFrame:
         "response_date": None,
         "share_price_drawdown": 0,
         "peak_allocation": 0,
+        "tvl_at_peak_usd": 0,
+        "tvl_at_trough_usd": 0,
+        "tvl_pre_depeg_usd": 0,
     }
     for col, default in defaults.items():
         if col not in df.columns:
@@ -220,7 +228,8 @@ def load_vaults() -> pd.DataFrame:
 
     # Ensure numerics
     for col in ["tvl_usd", "exposure_usd", "share_price", "share_price_drawdown",
-                 "days_before_depeg", "timelock_days", "peak_allocation"]:
+                 "days_before_depeg", "timelock_days", "peak_allocation",
+                 "tvl_at_peak_usd", "tvl_at_trough_usd", "tvl_pre_depeg_usd"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
@@ -501,6 +510,73 @@ def load_exposure_summary() -> pd.DataFrame:
         {"category": k, "count": v}
         for k, v in categories.items() if v > 0
     ])
+
+def load_pre_depeg_exposure() -> pd.DataFrame:
+    """
+    Compute per-vault toxic exposure on Nov 3 2025 (day before xUSD depeg)
+    from block3_allocation_timeseries.csv.
+
+    This is the correct vault-level allocation data (supply_assets_usd per vault
+    per toxic market per day). The block2 totalAssetsUsd field is MARKET-level
+    and should NOT be used for vault TVL.
+
+    Returns DataFrame with columns:
+        vault_address, vault_name, chain, chain_id, curator_name,
+        toxic_exposure_pre_depeg (sum of all toxic market allocations on Nov 3),
+        n_toxic_markets, peak_toxic_exposure, peak_toxic_date
+    """
+    alloc = _read("block3_allocation_timeseries.csv")
+    if alloc.empty or "supply_assets_usd" not in alloc.columns:
+        return pd.DataFrame()
+
+    alloc["supply_assets_usd"] = pd.to_numeric(alloc["supply_assets_usd"], errors="coerce").fillna(0)
+    if "date" not in alloc.columns:
+        return pd.DataFrame()
+
+    # Normalize chain column
+    if "blockchain" in alloc.columns and "chain" not in alloc.columns:
+        alloc.rename(columns={"blockchain": "chain"}, inplace=True)
+
+    # Pre-depeg: latest data point on or before Nov 3 2025
+    pre_depeg = alloc[alloc["date"] <= "2025-11-03"]
+
+    rows = []
+    group_key = "vault_address" if "vault_address" in alloc.columns else "vault_name"
+    for gid, g in alloc.groupby(group_key):
+        g_pre = pre_depeg[pre_depeg[group_key] == gid] if not pre_depeg.empty else pd.DataFrame()
+
+        # Pre-depeg exposure: sum across toxic markets on latest pre-depeg date
+        pre_depeg_val = 0.0
+        if not g_pre.empty:
+            latest_date = g_pre["date"].max()
+            day_data = g_pre[g_pre["date"] == latest_date]
+            pre_depeg_val = day_data["supply_assets_usd"].sum()
+
+        # Peak exposure across entire timeseries
+        daily_totals = g.groupby("date")["supply_assets_usd"].sum()
+        peak_val = daily_totals.max() if len(daily_totals) > 0 else 0
+        peak_date = daily_totals.idxmax() if len(daily_totals) > 0 and peak_val > 0 else None
+
+        # Count distinct toxic markets this vault was allocated to
+        n_markets = g["market_unique_key"].nunique() if "market_unique_key" in g.columns else 0
+
+        # Grab vault metadata from first row
+        first = g.iloc[0]
+        rows.append({
+            "vault_address": gid if group_key == "vault_address" else first.get("vault_address", ""),
+            "vault_name": first.get("vault_name", "?"),
+            "chain": first.get("chain", ""),
+            "chain_id": int(first.get("chain_id", 0)),
+            "curator_name": first.get("curator_name", ""),
+            "toxic_exposure_pre_depeg": pre_depeg_val,
+            "peak_toxic_exposure": peak_val,
+            "peak_toxic_date": peak_date,
+            "n_toxic_markets": n_markets,
+        })
+
+    df = pd.DataFrame(rows)
+    return df
+
 
 def load_timeline() -> pd.DataFrame:
     """

@@ -1,47 +1,26 @@
 """
-Query Runner — Adapter layer for block query scripts.
+Query Runner — Runs block query scripts in dependency order.
 
-Each original block script uses:
-    PROJECT_ROOT / "04-data-exports" / "raw" / "graphql" / <file>.csv
-
-This adapter creates that directory structure under a workspace dir,
-patches PROJECT_ROOT in each module, and runs them in dependency order.
+Scripts read/write from: PROJECT_ROOT / data / <file>.csv
+Runner patches PROJECT_ROOT to repo root so scripts find the right path.
 
 Usage:
-    # Run all blocks (full pipeline)
-    python queries/runner.py
-
-    # Run a single block
-    python queries/runner.py block1_markets
-
-    # Run from a specific block onwards
+    python queries/runner.py                    # Run all blocks
+    python queries/runner.py block1_markets     # Run single block
     python queries/runner.py --from block2_bad_debt
-
-    # List available blocks
     python queries/runner.py --list
-
-    # Use custom data directory
-    python queries/runner.py --data-dir ./my_data
 """
 
 import sys
 import time
-import shutil
 import argparse
 import importlib
 from pathlib import Path
 
-# ── Directory Setup ─────────────────────────────────────────
 QUERIES_DIR = Path(__file__).parent
 REPO_ROOT = QUERIES_DIR.parent
-DEFAULT_DATA_DIR = REPO_ROOT / "data"
+DATA_DIR = REPO_ROOT / "data"
 
-# Expected subdirectory structure (what the scripts expect under PROJECT_ROOT)
-GQL_SUBDIR = Path("04-data-exports") / "raw" / "graphql"
-DUNE_SUBDIR = Path("04-data-exports") / "raw" / "dune"
-
-# ── Block Registry ──────────────────────────────────────────
-# Order matters — each block depends on outputs from earlier blocks.
 BLOCKS = [
     {
         "name": "block1_markets",
@@ -76,23 +55,24 @@ BLOCKS = [
         "inputs": ["block1_vaults_graphql.csv"],
     },
     {
-        "name": "block3_curator_A",
-        "module": "block3_curator_response_A",
-        "description": "Curator allocation timeseries + admin events (Part A)",
-        "outputs": [
-            "block3_allocation_timeseries.csv",
-            "block3_admin_events.csv",
-        ],
+        "name": "block3_curator_A1",
+        "module": "block3_curator_response_A1",
+        "description": "Curator allocation timeseries (Part A1)",
+        "outputs": ["block3_allocation_timeseries.csv"],
+        "inputs": ["block1_vaults_graphql.csv", "block1_markets_graphql.csv"],
+    },
+    {
+        "name": "block3_curator_A2",
+        "module": "block3_curator_response_A2",
+        "description": "Curator admin events (Part A2)",
+        "outputs": ["block3_admin_events.csv"],
         "inputs": ["block1_vaults_graphql.csv", "block1_markets_graphql.csv"],
     },
     {
         "name": "block3_curator_B",
         "module": "block3_curator_response_B",
         "description": "Curator reallocations + classification (Part B)",
-        "outputs": [
-            "block3_reallocations.csv",
-            "block3_curator_profiles.csv",
-        ],
+        "outputs": ["block3_reallocations.csv", "block3_curator_profiles.csv"],
         "inputs": [
             "block1_vaults_graphql.csv",
             "block1_markets_graphql.csv",
@@ -144,86 +124,33 @@ BLOCKS = [
             "block6_pa_reallocations.csv",
             "block6_contagion_summary.csv",
         ],
-        "inputs": ["block1_markets_graphql.csv"],
+        "inputs": ["block1_vaults_graphql.csv", "block1_markets_graphql.csv"],
     },
 ]
 
 
-def setup_workspace(data_dir: Path) -> Path:
-    """
-    Create the directory structure the scripts expect.
-    Returns the 'fake' PROJECT_ROOT that will be patched into each module.
-
-    Scripts expect: PROJECT_ROOT / 04-data-exports / raw / graphql / <file>.csv
-    We create:      data_dir / _workspace / 04-data-exports / raw / graphql/
-    """
-    workspace = data_dir / "_workspace"
-    gql_path = workspace / GQL_SUBDIR
-    dune_path = workspace / DUNE_SUBDIR
-
-    gql_path.mkdir(parents=True, exist_ok=True)
-    dune_path.mkdir(parents=True, exist_ok=True)
-
-    # Sync existing CSVs from data_dir into the workspace gql dir
-    # (so downstream blocks can find upstream outputs)
-    for csv_file in data_dir.glob("*.csv"):
-        target = gql_path / csv_file.name
-        if not target.exists():
-            shutil.copy2(csv_file, target)
-
-    return workspace
-
-
-def sync_outputs_back(data_dir: Path):
-    """Copy any new CSVs from workspace back to data_dir (flat)."""
-    workspace_gql = data_dir / "_workspace" / GQL_SUBDIR
-    if not workspace_gql.exists():
-        return
-
-    count = 0
-    for csv_file in workspace_gql.glob("*.csv"):
-        target = data_dir / csv_file.name
-        shutil.copy2(csv_file, target)
-        count += 1
-
-    if count:
-        print(f"   📁 Synced {count} CSVs back to {data_dir}")
-
-
-def patch_and_run(block: dict, workspace: Path):
-    """
-    Import a block module, patch its PROJECT_ROOT, and call main().
-    """
+def patch_and_run(block: dict):
+    """Import block module, ensure PROJECT_ROOT points to repo root, call main()."""
     module_name = block["module"]
     print(f"\n{'=' * 70}")
     print(f"▶ Running: {block['name']} — {block['description']}")
-    print(f"  Module: {module_name}")
     print(f"{'=' * 70}")
 
-    # Ensure queries/ is on the path
     queries_dir = str(QUERIES_DIR)
     if queries_dir not in sys.path:
         sys.path.insert(0, queries_dir)
 
-    # Import (or reload) the module
     if module_name in sys.modules:
         mod = importlib.reload(sys.modules[module_name])
     else:
         mod = importlib.import_module(module_name)
 
-    # Patch PROJECT_ROOT to our workspace
+    # Ensure PROJECT_ROOT is repo root (scripts use PROJECT_ROOT / "data")
     if hasattr(mod, "PROJECT_ROOT"):
-        original = mod.PROJECT_ROOT
-        mod.PROJECT_ROOT = workspace
-        print(f"  Patched PROJECT_ROOT: {original} → {workspace}")
-    else:
-        print(f"  ⚠️  No PROJECT_ROOT found in module — may fail")
+        mod.PROJECT_ROOT = REPO_ROOT
 
-    # Also ensure the output directory exists
-    gql_dir = workspace / GQL_SUBDIR
-    gql_dir.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Run
     start = time.time()
     try:
         mod.main()
@@ -235,48 +162,30 @@ def patch_and_run(block: dict, workspace: Path):
         raise
 
 
-def check_inputs(block: dict, data_dir: Path) -> list:
-    """Check which input files are missing."""
-    workspace_gql = data_dir / "_workspace" / GQL_SUBDIR
-    missing = []
-    for inp in block["inputs"]:
-        # Check both workspace and data_dir
-        if not (workspace_gql / inp).exists() and not (data_dir / inp).exists():
-            missing.append(inp)
-    return missing
+def check_inputs(block: dict) -> list:
+    return [f for f in block["inputs"] if not (DATA_DIR / f).exists()]
 
 
-def run_blocks(block_names: list, data_dir: Path, skip_missing: bool = False):
-    """Run a list of blocks in order."""
-    workspace = setup_workspace(data_dir)
-
+def run_blocks(block_names: list, skip_missing: bool = False):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     for block in BLOCKS:
         if block["name"] not in block_names:
             continue
-
-        # Check inputs
-        missing = check_inputs(block, data_dir)
+        missing = check_inputs(block)
         if missing:
             if skip_missing:
                 print(f"\n⚠️  Skipping {block['name']} — missing inputs: {missing}")
                 continue
             else:
                 print(f"\n❌ Cannot run {block['name']} — missing inputs: {missing}")
-                print(f"   Run upstream blocks first, or use --skip-missing")
                 sys.exit(1)
-
-        patch_and_run(block, workspace)
-
-        # Sync outputs back to data_dir after each block
-        sync_outputs_back(data_dir)
-
+        patch_and_run(block)
     print(f"\n{'=' * 70}")
-    print(f"✅ Pipeline complete. CSVs in: {data_dir}")
+    print(f"✅ Pipeline complete. CSVs in: {DATA_DIR}")
     print(f"{'=' * 70}")
 
 
 def list_blocks():
-    """Print available blocks and their dependencies."""
     print("\nAvailable blocks:\n")
     for b in BLOCKS:
         print(f"  {b['name']:25s} — {b['description']}")
@@ -291,7 +200,6 @@ def main():
     parser.add_argument("blocks", nargs="*", help="Block names to run (default: all)")
     parser.add_argument("--list", action="store_true", help="List available blocks")
     parser.add_argument("--from", dest="from_block", help="Run from this block onwards")
-    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR, help="Data directory")
     parser.add_argument("--skip-missing", action="store_true", help="Skip blocks with missing inputs")
 
     args = parser.parse_args()
@@ -300,7 +208,6 @@ def main():
         list_blocks()
         return
 
-    # Determine which blocks to run
     all_names = [b["name"] for b in BLOCKS]
 
     if args.from_block:
@@ -321,10 +228,8 @@ def main():
         block_names = all_names
 
     print(f"📋 Will run: {' → '.join(block_names)}")
-    print(f"📁 Data dir: {args.data_dir}")
-
-    args.data_dir.mkdir(parents=True, exist_ok=True)
-    run_blocks(block_names, args.data_dir, skip_missing=args.skip_missing)
+    print(f"📁 Data dir: {DATA_DIR}")
+    run_blocks(block_names, skip_missing=args.skip_missing)
 
 
 if __name__ == "__main__":

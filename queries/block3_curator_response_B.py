@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Set, Tuple, Optional
 
 # ── Project paths ──
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 env_path = PROJECT_ROOT / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -37,10 +37,11 @@ GRAPHQL_URL = "https://blue-api.morpho.org/graphql"
 REQUEST_DELAY = 0.3
 
 # ── Time windows ──
-TS_SEPT_01  = 1756684800
+# ── Time windows (Oct 1 → Nov 30, 2025) ──
+TS_OCT_01   = 1759276800
 TS_OCT_28   = 1761696000
 TS_NOV_04   = 1762214400   # Stream Finance collapse / xUSD depeg
-TS_JAN_31   = 1769817600
+TS_NOV_30   = 1764547199
 
 DEPEG_TS = TS_NOV_04
 
@@ -83,7 +84,7 @@ def ts_to_datetime(ts) -> str:
 
 
 def load_block1_data() -> Tuple[pd.DataFrame, pd.DataFrame, Dict, Set]:
-    gql_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
+    gql_dir = PROJECT_ROOT / "data"
     vaults_path = gql_dir / "block1_vaults_graphql.csv"
     markets_path = gql_dir / "block1_markets_graphql.csv"
 
@@ -156,8 +157,8 @@ def query_reallocations_for_chain(chain_id: int, chain_name: str,
             where: {{
               vaultAddress_in: [{addrs_str}]
               chainId_in: [{chain_id}]
-              timestamp_gte: {TS_SEPT_01}
-              timestamp_lte: {TS_JAN_31}
+              timestamp_gte: {TS_OCT_01}
+              timestamp_lte: {TS_NOV_30}
             }}
           ) {{
             items {{
@@ -301,7 +302,7 @@ def classify_curator_response(
 
     cap_zero_events = []
     for evt in vault_admin:
-        if evt["event_type"] in ("SetCap", "SubmitCap") and evt.get("details"):
+        if evt["event_type"] in ("setCap", "submitCap") and evt.get("details"):
             try:
                 d = json.loads(evt["details"])
                 if d.get("cap_is_zero"):
@@ -317,7 +318,7 @@ def classify_curator_response(
         profile["first_cap_zero_ts"] = None
         profile["first_cap_zero_date"] = None
 
-    queue_removals = [e for e in vault_admin if e["event_type"] == "SetWithdrawQueue"]
+    queue_removals = [e for e in vault_admin if e["event_type"] == "setWithdrawQueue"]
     queue_removed_toxic_ts = None
     for evt in sorted(queue_removals, key=lambda e: e["timestamp"]):
         try:
@@ -412,7 +413,7 @@ def main():
     df_vaults, df_markets, chain_keys, toxic_keys = load_block1_data()
     vaults = get_unique_vaults(df_vaults)
 
-    out_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
+    out_dir = PROJECT_ROOT / "data"
 
     # ── Load Part A outputs ──
     alloc_path = out_dir / "block3_allocation_timeseries.csv"

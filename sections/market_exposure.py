@@ -106,21 +106,28 @@ def render():
     st.subheader("Vault Exposure Summary")
 
     if not vaults.empty:
-        vault_display = vaults[["vault_name", "chain", "curator", "tvl_usd", "exposure_usd",
-                                 "collateral", "status", "response_class"]].sort_values("tvl_usd", ascending=False)
+        # Include peak TVL if available to show pre-depeg values
+        display_cols = ["vault_name", "chain", "curator", "tvl_usd", "exposure_usd",
+                        "collateral", "status", "response_class"]
+        col_config = {
+            "vault_name": "Vault",
+            "chain": "Chain",
+            "curator": "Curator",
+            "tvl_usd": st.column_config.NumberColumn("Current TVL", format="$%,.0f"),
+            "exposure_usd": st.column_config.NumberColumn("Exposure", format="$%,.0f"),
+            "collateral": "Collateral",
+            "status": "Status",
+            "response_class": "Response",
+        }
+        if "tvl_at_peak_usd" in vaults.columns and vaults["tvl_at_peak_usd"].sum() > 0:
+            display_cols.insert(4, "tvl_at_peak_usd")
+            col_config["tvl_at_peak_usd"] = st.column_config.NumberColumn("Peak TVL", format="$%,.0f")
+
+        vault_display = vaults[display_cols].sort_values("tvl_usd", ascending=False)
 
         st.dataframe(
             vault_display,
-            column_config={
-                "vault_name": "Vault",
-                "chain": "Chain",
-                "curator": "Curator",
-                "tvl_usd": st.column_config.NumberColumn("TVL", format="$%,.0f"),
-                "exposure_usd": st.column_config.NumberColumn("Exposure", format="$%,.0f"),
-                "collateral": "Collateral",
-                "status": "Status",
-                "response_class": "Response",
-            },
+            column_config=col_config,
             hide_index=True,
             use_container_width=True,
         )

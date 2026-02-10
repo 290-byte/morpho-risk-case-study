@@ -49,7 +49,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Optional
 
 # ── Project paths ──
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 env_path = PROJECT_ROOT / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -794,7 +794,7 @@ def main():
     print("Block 5 — Liquidation Mechanism Breakdown")
     print("=" * 80)
 
-    gql_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
+    gql_dir = PROJECT_ROOT / "data"
 
     # ── Load Block 1 markets ──
     markets_path = gql_dir / "block1_markets_graphql.csv"

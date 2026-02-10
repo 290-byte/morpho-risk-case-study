@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Optional
 
 # Script lives at: 03-queries/block2-bad-debt/graphsql/script.py → 4 levels to /app/
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 env_path = PROJECT_ROOT / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -213,21 +213,34 @@ def compute_vault_stats(daily_rows: List[Dict], vault_info: Dict) -> Dict:
         depeg_end_price = None
         depeg_drop_pct = None
 
-    # TVL at peak vs trough
+    # TVL at peak vs trough vs pre-depeg
     tvl_points = [(r["timestamp"], r["total_assets_usd"]) for r in daily_rows
                   if r.get("total_assets_usd") is not None]
     tvl_at_peak = None
     tvl_at_trough = None
+    tvl_pre_depeg = None
     if tvl_points:
         tvl_lookup = dict(tvl_points)
         # Find closest TVL to peak_ts and trough_ts
         tvl_at_peak = tvl_lookup.get(peak_ts)
         tvl_at_trough = tvl_lookup.get(trough_ts)
 
-    # Estimated loss from share price drop
+        # Pre-depeg TVL: closest point on or before Nov 3 2025 00:00 UTC
+        # This is the "what was at stake" number
+        pre_depeg_candidates = [(ts, tvl) for ts, tvl in tvl_points if ts <= nov3]
+        if pre_depeg_candidates:
+            pre_depeg_candidates.sort(key=lambda x: x[0])
+            tvl_pre_depeg = pre_depeg_candidates[-1][1]  # latest before depeg
+        elif tvl_points:
+            # Fallback: earliest available TVL if vault was created after Nov 3
+            tvl_points_sorted = sorted(tvl_points, key=lambda x: x[0])
+            tvl_pre_depeg = tvl_points_sorted[0][1]
+
+    # Estimated loss from share price drop (use pre-depeg TVL for most accurate estimate)
     estimated_loss_usd = None
-    if tvl_at_peak and max_drawdown_pct > 0.001:
-        estimated_loss_usd = tvl_at_peak * max_drawdown_pct
+    best_tvl = tvl_pre_depeg or tvl_at_peak
+    if best_tvl and max_drawdown_pct > 0.001:
+        estimated_loss_usd = best_tvl * max_drawdown_pct
 
     return {
         "vault_address": vault_info["address"],
@@ -260,6 +273,7 @@ def compute_vault_stats(daily_rows: List[Dict], vault_info: Dict) -> Dict:
         # TVL context
         "tvl_at_peak_usd": tvl_at_peak,
         "tvl_at_trough_usd": tvl_at_trough,
+        "tvl_pre_depeg_usd": tvl_pre_depeg,
         "estimated_loss_usd": estimated_loss_usd,
 
         # Data quality
@@ -277,7 +291,7 @@ def main():
     print("=" * 80)
 
     # ── Load Block 1 vault data (3-phase discovery already captures ALL vaults) ──
-    graphql_path = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql" / "block1_vaults_graphql.csv"
+    graphql_path = PROJECT_ROOT / "data" / "block1_vaults_graphql.csv"
     if not graphql_path.exists():
         print(f"❌ Block 1 vaults CSV not found: {graphql_path}")
         return
@@ -435,7 +449,7 @@ def main():
     # ══════════════════════════════════════════════════════════════
     # SAVE OUTPUTS
     # ══════════════════════════════════════════════════════════════
-    output_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
+    output_dir = PROJECT_ROOT / "data"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Daily timeseries
@@ -498,6 +512,8 @@ def main():
                 print(f"    Est. loss:   ${r['estimated_loss_usd']:,.2f}")
             if pd.notna(r.get('tvl_at_peak_usd')):
                 print(f"    TVL at peak: ${r['tvl_at_peak_usd']:,.2f}")
+            if pd.notna(r.get('tvl_pre_depeg_usd')):
+                print(f"    TVL pre-depeg (Nov 3): ${r['tvl_pre_depeg_usd']:,.2f}")
             if pd.notna(r.get('recovery_pct')):
                 print(f"    Recovery:    {r['recovery_pct']*100:.1f}%")
     else:

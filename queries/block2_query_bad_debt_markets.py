@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from typing import Dict, Optional
 
 # Script lives at: 03-queries/block2-bad-debt/graphsql/script.py → 4 levels to /app/
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 env_path = PROJECT_ROOT / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -539,7 +539,7 @@ def main():
     print("=" * 80)
 
     # ── Load Block 1 market data ──
-    input_path = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql" / "block1_markets_graphql.csv"
+    input_path = PROJECT_ROOT / "data" / "block1_markets_graphql.csv"
     if not input_path.exists():
         print(f"❌ Block 1 markets CSV not found: {input_path}")
         print("   Run block1_query_markets_graphql.py first.")
@@ -608,7 +608,7 @@ def main():
     df = df.sort_values("best_estimate_bad_debt_usd", ascending=False)
 
     # ── Save ──
-    output_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
+    output_dir = PROJECT_ROOT / "data"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "block2_bad_debt_by_market.csv"
     df.to_csv(output_path, index=False)

@@ -37,7 +37,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Tuple
 
 # ── Project paths ──
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 env_path = PROJECT_ROOT / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -45,13 +45,12 @@ GRAPHQL_URL = "https://blue-api.morpho.org/graphql"
 REQUEST_DELAY = 0.3
 
 # ── Time windows ──
-TS_SEPT_01  = 1756684800
+TS_OCT_01   = 1759276800
 TS_NOV_01   = 1761955200
 TS_NOV_04   = 1762214400   # xUSD depeg
 TS_NOV_06   = 1762387200   # deUSD crash
 TS_NOV_15   = 1763164800
-TS_DEC_01   = 1764547200
-TS_JAN_31   = 1769817600
+TS_NOV_30   = 1764547199
 
 DEPEG_TS = TS_NOV_04
 
@@ -373,7 +372,7 @@ def main():
     print("Block 3b — Liquidity Stress Analysis")
     print("=" * 80)
 
-    gql_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
+    gql_dir = PROJECT_ROOT / "data"
 
     # ── Load existing data ──
     markets_path = gql_dir / "block1_markets_graphql.csv"
@@ -437,7 +436,7 @@ def main():
         print(f"      Daily (Sept 1 → Jan 31)...")
         daily = query_market_utilization(
             market_id, chain_id, collateral, loan, chain,
-            TS_SEPT_01, TS_JAN_31, "DAY"
+            TS_OCT_01, TS_NOV_30, "DAY"
         )
         if daily:
             print(f"      ✅ {len(daily)} daily pts")

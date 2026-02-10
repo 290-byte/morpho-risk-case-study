@@ -46,7 +46,7 @@ from collections import defaultdict
 from typing import List, Dict, Tuple, Optional
 
 # ── Project paths ──
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 GRAPHQL_URL = "https://blue-api.morpho.org/graphql"
 REQUEST_DELAY = 0.3
 
@@ -437,27 +437,47 @@ def main():
     print("=" * 80)
 
     # ── Paths ──
-    dune_dir = PROJECT_ROOT / "04-data-exports" / "raw" / "dune"
-    gql_dir  = PROJECT_ROOT / "04-data-exports" / "raw" / "graphql"
-    out_dir  = gql_dir  # output alongside other graphql data
+    gql_dir  = PROJECT_ROOT / "data"
+    out_dir  = gql_dir
 
     # ── Load data ──
-    vaults_path = dune_dir / "block1_dune_vaults_filtered.csv"
-    markets_dune_path = dune_dir / "block1_dune_markets_filtered.csv"
+    vaults_path = gql_dir / "block1_vaults_graphql.csv"
     markets_gql_path = gql_dir / "block1_markets_graphql.csv"
 
-    df_vaults = pd.read_csv(vaults_path) if vaults_path.exists() else pd.DataFrame()
-    df_markets_dune = pd.read_csv(markets_dune_path) if markets_dune_path.exists() else pd.DataFrame()
+    df_vaults_raw = pd.read_csv(vaults_path) if vaults_path.exists() else pd.DataFrame()
     df_markets_gql = pd.read_csv(markets_gql_path) if markets_gql_path.exists() else pd.DataFrame()
 
     print(f"\n📂 Loaded data:")
-    print(f"   Vaults (Dune):      {len(df_vaults)} rows")
-    print(f"   Markets (Dune):     {len(df_markets_dune)} rows")
+    print(f"   Vaults (GraphQL):   {len(df_vaults_raw)} rows")
     print(f"   Markets (GraphQL):  {len(df_markets_gql)} rows")
 
-    if len(df_vaults) == 0:
+    if len(df_vaults_raw) == 0:
         print("   ❌ No vault data found — cannot proceed")
         return
+
+    # Map GraphQL columns to expected names for compatibility
+    col_map = {
+        "vault_address": "metamorpho",
+        "vault_name": "metamorpho_name",
+        "blockchain": "chain",
+    }
+    df_vaults = df_vaults_raw.rename(columns=col_map)
+
+    # Create market_name if not present
+    if "market_name" not in df_vaults.columns:
+        if "collateral_symbol" in df_vaults.columns and "loan_symbol" in df_vaults.columns:
+            df_vaults["market_name"] = df_vaults["collateral_symbol"] + "/" + df_vaults["loan_symbol"]
+        else:
+            df_vaults["market_name"] = df_vaults.get("market_unique_key", "unknown")
+
+    # Map supply column
+    if "vault_supply_usd" not in df_vaults.columns:
+        if "supply_assets_usd" in df_vaults.columns:
+            df_vaults["vault_supply_usd"] = df_vaults["supply_assets_usd"]
+        elif "vault_total_assets_usd" in df_vaults.columns:
+            df_vaults["vault_supply_usd"] = df_vaults["vault_total_assets_usd"]
+        else:
+            df_vaults["vault_supply_usd"] = 0.0
 
     # Get toxic market IDs from GraphQL markets data
     toxic_market_ids = set()
