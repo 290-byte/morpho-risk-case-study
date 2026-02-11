@@ -38,8 +38,8 @@ BLOCKS = [
     },
     {
         "name": "block2_bad_debt",
-        "module": "block2_query_bad_debt_markets",
-        "description": "Per-market bad debt quantification (3-layer analysis)",
+        "module": "block2_query_markets",
+        "description": "Market-level bad debt (realized + unrealized) + oracle architecture + state",
         "outputs": ["block2_bad_debt_by_market.csv"],
         "inputs": ["block1_markets_graphql.csv"],
     },

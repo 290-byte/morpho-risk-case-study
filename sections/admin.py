@@ -1,150 +1,148 @@
-"""Admin page — Reload data from Morpho API."""
+"""Section: Data Management — pipeline overview and source code reference."""
 
 import streamlit as st
 import pandas as pd
-import subprocess
-import sys
 from pathlib import Path
-from datetime import datetime
+from utils.data_loader import load_csv
 
-DATA_DIR = Path(__file__).parent.parent / "data"
-QUERIES_DIR = Path(__file__).parent.parent / "queries"
-
-
-def get_csv_status() -> list:
-    """Check which CSVs exist and their freshness."""
-    if not DATA_DIR.exists():
-        return []
-    files = sorted(DATA_DIR.glob("*.csv"))
-    rows = []
-    for f in files:
-        stat = f.stat()
-        rows.append({
-            "file": f.name,
-            "rows": sum(1 for _ in open(f)) - 1,
-            "size_kb": stat.st_size / 1024,
-            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-        })
-    return rows
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 def render():
     st.title("Data Management")
-    st.caption("Reload data from Morpho GraphQL API, or view current data status.")
 
-    # -- Current Data Status ------------------------------------
-    st.subheader("Current Data Files")
+    st.markdown(
+        "All data in this dashboard is sourced from the **Morpho Blue GraphQL API** and "
+        "on-chain contract reads. The pipeline is organized into query blocks that can be "
+        "run independently or together."
+    )
 
-    csv_files = get_csv_status()
-    if csv_files:
-        df_status = pd.DataFrame(csv_files)
-        st.dataframe(
-            df_status,
-            column_config={
-                "file": "File",
-                "rows": st.column_config.NumberColumn("Rows", format="%d"),
-                "size_kb": st.column_config.NumberColumn("Size (KB)", format="%.1f"),
-                "modified": "Last Modified",
-            },
-            hide_index=True,
-            use_container_width=True,
-        )
-        total_rows = sum(f["rows"] for f in csv_files)
-        st.caption(f"{len(csv_files)} files, {total_rows:,} total rows")
-    else:
-        st.warning("No data files found. Run the pipeline to fetch data.")
-
+    # ── Source Code ──────────────────────────────────────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+    st.subheader("Source Code")
 
-    # -- Pipeline Runner ----------------------------------------
-    st.subheader("Reload Data from API")
+    st.markdown(
+        "The full source code for this case study — including all query scripts, "
+        "the dashboard application, and data processing logic — is available on GitHub:"
+    )
+    st.markdown(
+        "**[github.com/290-byte/morpho-risk-case-study]"
+        "(https://github.com/290-byte/morpho-risk-case-study)**"
+    )
+    st.caption(
+        "Includes: GraphQL query scripts, on-chain data fetchers, "
+        "Streamlit dashboard code, Dockerfile, and documentation."
+    )
 
-    st.markdown("""
-    Runs the query pipeline against the Morpho GraphQL API.
-    Each block fetches fresh data and overwrites the CSVs.
-
-    **Block execution order:**
-    1. **Markets** — Scan all chains for toxic collateral
-    2. **Vaults** — 3-phase discovery (current + historical + individual)
-    3. **Bad Debt** — Per-market quantification
-    4. **Share Prices** — Daily + hourly for all vaults
-    5. **Curator A1** — Allocation timeseries
-    6. **Curator A2** — Admin events (cap sets, queue changes)
-    7. **Curator B** — Reallocations + classification (needs A1 + A2)
-    8. **Liquidity Stress** — Utilization + net flows
-    9. **Liquidation** — Oracle configs, borrowers, LTV
-    10. **Contagion** — Cross-market exposure mapping
-    """)
+    # ── Pipeline Overview ────────────────────────────────────
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+    st.subheader("Query Pipeline")
 
     blocks = [
-        ("block1_markets", "Block 1: Markets (scan all chains)"),
-        ("block1_vaults", "Block 1: Vaults (3-phase discovery)"),
-        ("block2_bad_debt", "Block 2: Bad Debt (per-market)"),
-        ("block2_share_prices", "Block 2: Share Prices (daily + hourly)"),
-        ("block3_curator_A1", "Block 3A1: Curator Allocation Timeseries"),
-        ("block3_curator_A2", "Block 3A2: Curator Admin Events"),
-        ("block3_curator_B", "Block 3B: Curator Reallocations + Classification"),
-        ("block3b_liquidity", "Block 3b: Liquidity Stress"),
-        ("block5_liquidation", "Block 5: Liquidation Breakdown"),
-        ("block6_contagion", "Block 6: Contagion Analysis"),
+        ("Block 1 — Markets & Vaults", "block1",
+         "Fetches all Morpho Blue markets using xUSD, deUSD, and sdeUSD as collateral, "
+         "plus all MetaMorpho vaults with current or historical exposure to those markets.",
+         ["block1_markets_graphql.csv", "block1_vaults_graphql.csv"]),
+        ("Block 2 — Share Prices & Bad Debt", "block2",
+         "Queries daily share price time series for all affected vaults and computes "
+         "drawdown metrics. Calculates bad debt per market from supply/borrow gaps and "
+         "oracle vs spot price analysis.",
+         ["block2_share_prices_daily.csv", "block2_share_prices_hourly.csv",
+          "block2_share_price_summary.csv", "block2_bad_debt_by_market.csv"]),
+        ("Block 3 — Curator Response", "block3",
+         "Pulls vault admin events (allocation changes, supply cap modifications), "
+         "daily allocation time series, market utilization, and stress comparisons "
+         "to reconstruct curator behavior during the crisis.",
+         ["block3_admin_events.csv", "block3_allocation_timeseries.csv",
+          "block3_curator_profiles.csv", "block3_reallocations.csv",
+          "block3_market_utilization_daily.csv", "block3_market_utilization_hourly.csv",
+          "block3_stress_comparison.csv", "block3_vault_net_flows.csv"]),
+        ("Block 5 — Liquidation Analysis", "block5",
+         "Examines liquidation mechanics: utilization rates, oracle configurations, "
+         "LTV analysis, borrower positions, and why liquidations failed for these markets.",
+         ["block5_oracle_configs.csv", "block5_ltv_analysis.csv",
+          "block5_borrower_positions.csv", "block5_collateral_at_risk.csv",
+          "block5_asset_prices.csv", "block5_liquidation_events.csv"]),
+        ("Block 6 — Contagion Mapping", "block6",
+         "Maps vault-to-market exposure pairs, identifies contagion bridges "
+         "(vaults that hold both toxic and clean market positions), and "
+         "analyzes public allocator configurations.",
+         ["block6_vault_market_exposure.csv", "block6_vault_allocation_summary.csv",
+          "block6_contagion_bridges.csv", "block6_market_connections.csv",
+          "block6_vault_full_allocations.csv", "block6_vault_reallocations.csv"]),
+        ("Timeline", "timeline",
+         "Curated timeline of key events during the depeg crisis, with sources and links.",
+         ["timeline_events.csv"]),
     ]
 
-    col1, col2 = st.columns([2, 1])
+    for title, block_id, description, files in blocks:
+        with st.container(border=True):
+            st.markdown(f"**{title}**")
+            st.caption(description)
 
-    with col1:
-        selected = st.multiselect(
-            "Select blocks to run:",
-            options=[b[0] for b in blocks],
-            default=[b[0] for b in blocks],
-            format_func=lambda x: next(label for name, label in blocks if name == x),
-            key="block_select",
-        )
+            # Check which files exist
+            found = []
+            missing = []
+            for f in files:
+                if (DATA_DIR / f).exists():
+                    found.append(f)
+                else:
+                    missing.append(f)
 
-    with col2:
-        skip_missing = st.checkbox("Skip blocks with missing inputs", value=True)
-
-    if st.button("Run Pipeline", type="primary", use_container_width=True):
-        if not selected:
-            st.warning("Select at least one block to run.")
-            return
-
-        runner_path = QUERIES_DIR / "runner.py"
-        if not runner_path.exists():
-            st.error(f"Runner not found at {runner_path}")
-            return
-
-        cmd = [
-            sys.executable, str(runner_path),
-        ]
-        if skip_missing:
-            cmd.append("--skip-missing")
-        cmd.extend(selected)
-
-        st.markdown("---")
-        st.markdown("**Pipeline Output:**")
-
-        with st.status("Running pipeline...", expanded=True) as status:
-            try:
-                process = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(QUERIES_DIR.parent),
+            if found:
+                st.markdown(
+                    "✅ " + " · ".join(f"`{f}`" for f in found)
+                )
+            if missing:
+                st.markdown(
+                    "⚠️ Missing: " + " · ".join(f"`{f}`" for f in missing)
                 )
 
-                if process.stdout:
-                    st.code(process.stdout, language="text")
-                if process.stderr:
-                    st.code(process.stderr, language="text")
+    # ── Data Files ───────────────────────────────────────────
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+    st.subheader("Loaded Data Files")
 
-                if process.returncode == 0:
-                    status.update(label="Pipeline complete", state="complete")
-                    st.success("Data refreshed. Navigate to other pages to see updated results.")
-                    st.cache_data.clear()
-                else:
-                    status.update(label="Pipeline failed", state="error")
-                    st.error(f"Exit code: {process.returncode}")
+    if DATA_DIR.exists():
+        csv_files = sorted(DATA_DIR.glob("*.csv"))
+        if csv_files:
+            file_info = []
+            for f in csv_files:
+                try:
+                    df = pd.read_csv(f, nrows=0)
+                    n_rows = sum(1 for _ in open(f)) - 1
+                    file_info.append({
+                        "File": f.name,
+                        "Rows": n_rows,
+                        "Columns": len(df.columns),
+                        "Size": f"{f.stat().st_size / 1024:.1f} KB",
+                    })
+                except Exception:
+                    file_info.append({
+                        "File": f.name,
+                        "Rows": "—",
+                        "Columns": "—",
+                        "Size": f"{f.stat().st_size / 1024:.1f} KB",
+                    })
 
-            except Exception as e:
-                status.update(label="Error", state="error")
-                st.error(f"Failed to run pipeline: {e}")
+            st.dataframe(pd.DataFrame(file_info), hide_index=True, use_container_width=True)
+        else:
+            st.info("No CSV files found in the data directory.")
+    else:
+        st.warning("Data directory not found. Run the query pipeline first.")
+
+    # ── Snapshot ─────────────────────────────────────────────
+    snapshot_path = DATA_DIR / "snapshot.txt"
+    if snapshot_path.exists():
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+        st.subheader("Current Snapshot")
+        st.caption("Auto-generated summary of all dashboard metrics. Regenerated on each app reload.")
+        snapshot_text = snapshot_path.read_text(encoding="utf-8")
+        import html
+        escaped = html.escape(snapshot_text)
+        st.markdown(
+            f'<div style="max-height:600px; overflow-y:auto; background:#f8f9fa; '
+            f'padding:16px; border-radius:8px; border:1px solid #e2e8f0; '
+            f'font-family:monospace; font-size:12px; white-space:pre-wrap;">'
+            f'{escaped}</div>',
+            unsafe_allow_html=True,
+        )

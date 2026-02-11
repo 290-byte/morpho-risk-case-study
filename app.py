@@ -130,11 +130,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -- Navigation ---------------------------------------------------
-from sections import overview, market_exposure, bad_debt, curator_response
+from sections import background, overview, market_exposure, bad_debt, curator_response
 from sections import liquidity_stress, liquidation_failure, contagion, admin
 
 pages = {
     "Case Study": [
+        st.Page(background.render, title="Background", url_path="background"),
         st.Page(overview.render, title="Overview & Timeline", url_path="overview"),
         st.Page(market_exposure.render, title="Market Exposure", url_path="markets"),
         st.Page(bad_debt.render, title="Bad Debt Analysis", url_path="bad-debt"),
@@ -154,6 +155,13 @@ pages = {
 
 nav = st.navigation(pages)
 
+# -- Generate snapshot on each app load ---------------------------
+try:
+    from utils.snapshot import write_snapshot
+    write_snapshot()
+except Exception:
+    pass  # Non-critical — don't break the app if snapshot fails
+
 # -- Sidebar info -------------------------------------------------
 with st.sidebar:
     st.caption("Morpho Risk Case Study")
@@ -165,11 +173,5 @@ with st.sidebar:
     # Show warnings for any missing pipeline data files
     from utils.data_loader import show_data_warnings
     show_data_warnings()
-
-# -- Snapshot (remove for production) --------------------------------
-try:
-    from utils.snapshot import write_snapshot; write_snapshot()
-except Exception:
-    pass  # snapshot is non-critical
 
 nav.run()

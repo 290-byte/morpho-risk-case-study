@@ -1,0 +1,4 @@
+vault_address,vault_name,n_toxic_markets,n_clean_markets,toxic_supply_usd,clean_supply_usd,total_supply_usd,toxic_pct,contagion_path,risk
+0x55555815a5595991C3A0Ff119B59AEF6C8B55555,Adpend USDC,1,29,2752282.0474503753,0.14994674267456998,2752282.197397118,99.99999455191248,BRIDGE,Depositors in clean markets share loss from toxic markets
+0x94643e86aa5E38DDAc6c7791C1297f4E40cD96c1,1337 USDC,1,3,1467269.844867127,0.27910360075377805,1467270.1239707277,99.9999809780356,BRIDGE,Depositors in clean markets share loss from toxic markets
+0x1265a81d42d513Df40d0031f8f2e1346954d665a,MEV Capital Elixir USDC,1,2,8334.768245748119,0.0,8334.768245748119,100.0,BRIDGE,Depositors in clean markets share loss from toxic markets

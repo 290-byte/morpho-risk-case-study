@@ -20,16 +20,36 @@ def render():
 
     # ── Key Metrics ─────────────────────────────────────────
     at_risk = markets[markets["status"].str.contains("AT_RISK")]
+
+    # Compute collateral exposure from data
+    collat_col = "total_collat_usd" if "total_collat_usd" in markets.columns else None
+    if collat_col:
+        total_collat = markets[collat_col].sum()
+    else:
+        total_collat = 0
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Markets", len(markets))
     c2.metric("At Risk (100% Util)", len(at_risk))
-    c3.metric("Total Collateral Exposure", "$13,004")
+    c3.metric("Total Collateral (spot)", format_usd(total_collat),
+              help="Collateral valued at current spot prices (near \\$0 for collapsed assets)")
     c4.metric("Total Supply Locked", f"${markets['supply_usd'].sum():,.0f}")
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
+    # ── Elixir Private Market Warning ────────────────────────
+    st.warning(
+        "**Hidden exposure: Elixir's \\$68M private Morpho market.** "
+        "In addition to the 18 public markets shown below, Elixir lent **\\$68M USDC** "
+        "(65% of deUSD's total backing) to Stream Finance through **private, non-whitelisted "
+        "Morpho markets** where Stream was the sole borrower, using xUSD as collateral. "
+        "These private markets are not captured by the public Morpho API and represent "
+        "the largest single Morpho exposure to this crisis. "
+        "*(Source: BlockEden analysis, lawsuit details, YAM exposure map)*"
+    )
+
     # ── Market Table ────────────────────────────────────────
-    st.subheader("All 18 Toxic Markets")
+    st.subheader(f"All {len(markets)} Toxic Markets")
 
     display_cols = ["market_label", "chain", "collateral", "loan", "lltv", "supply_usd",
                     "borrow_usd", "utilization", "bad_debt_usd", "status"]
@@ -106,7 +126,6 @@ def render():
     st.subheader("Vault Exposure Summary")
 
     if not vaults.empty:
-        # Include peak TVL if available to show pre-depeg values
         display_cols = ["vault_name", "chain", "curator", "tvl_usd", "exposure_usd",
                         "collateral", "status", "response_class"]
         col_config = {
@@ -119,10 +138,9 @@ def render():
             "status": "Status",
             "response_class": "Response",
         }
-        if "tvl_at_peak_usd" in vaults.columns and vaults["tvl_at_peak_usd"].sum() > 0:
-            display_cols.insert(4, "tvl_at_peak_usd")
-            col_config["tvl_at_peak_usd"] = st.column_config.NumberColumn("Peak TVL", format="$%,.0f")
 
+        # Filter to available columns only
+        display_cols = [c for c in display_cols if c in vaults.columns]
         vault_display = vaults[display_cols].sort_values("tvl_usd", ascending=False)
 
         st.dataframe(

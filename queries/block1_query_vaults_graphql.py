@@ -86,6 +86,10 @@ VAULT_FIELDS = """
     listed
     featured
     creationTimestamp
+    creatorAddress
+    factory {
+      address
+    }
     asset {
       address
       symbol
@@ -638,6 +642,7 @@ def parse_vault_market_data(vault_market: Dict) -> Dict:
     state = vault.get("state") or {}
     chain = vault.get("chain") or {}
     deposit_asset = vault.get("asset") or {}
+    factory = vault.get("factory") or {}
 
     # --- Curator resolution ---
     curator_address = state.get("curator")
@@ -710,6 +715,8 @@ def parse_vault_market_data(vault_market: Dict) -> Dict:
         "vault_listed": vault.get("listed"),
         "vault_featured": vault.get("featured"),
         "vault_creation_timestamp": vault.get("creationTimestamp"),
+        "vault_creator_address": vault.get("creatorAddress"),
+        "factory_address": factory.get("address"),
         "deposit_asset_symbol": deposit_asset.get("symbol"),
         "deposit_asset_address": deposit_asset.get("address"),
         "deposit_asset_decimals": safe_int(deposit_asset.get("decimals")),
@@ -940,6 +947,22 @@ def main():
         print(f"\n{'─' * 60}")
         print(f"⏱️  TIMELOCKS (Block 3.2)")
         print(f"{'─' * 60}")
+
+        # Factory / Vault Version analysis
+        if 'factory_address' in df.columns:
+            print(f"\n{'─' * 60}")
+            print(f"🏭 VAULT FACTORIES (Version Identification)")
+            print(f"{'─' * 60}")
+            factory_summary = df[['vault_name', 'factory_address', 'vault_creation_timestamp', 'blockchain']].drop_duplicates(subset='vault_name')
+            factory_counts = factory_summary['factory_address'].value_counts()
+            for factory_addr, count in factory_counts.items():
+                if pd.notna(factory_addr):
+                    names = factory_summary[factory_summary['factory_address'] == factory_addr]['vault_name'].tolist()
+                    print(f"   Factory {factory_addr}:")
+                    print(f"     Vaults ({count}): {', '.join(names)}")
+                else:
+                    print(f"   Factory UNKNOWN: {count} vaults")
+
         timelocks = df[['vault_name', 'curator_name', 'timelock']].drop_duplicates(subset='vault_name')
         for _, row in timelocks.iterrows():
             tl_seconds = row['timelock']

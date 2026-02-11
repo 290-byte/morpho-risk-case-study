@@ -89,6 +89,7 @@ def fetch_vault_history(address: str, chain_id: int, interval: str,
         }}
         state {{
           totalAssetsUsd
+          totalAssets
           totalSupply
           sharePriceNumber
           sharePriceUsd
@@ -104,6 +105,11 @@ def fetch_vault_history(address: str, chain_id: int, interval: str,
             interval: {interval}
           }}) {{ x y }}
           totalAssetsUsd(options: {{
+            startTimestamp: {start_ts}
+            endTimestamp: {end_ts}
+            interval: {interval}
+          }}) {{ x y }}
+          totalAssets(options: {{
             startTimestamp: {start_ts}
             endTimestamp: {end_ts}
             interval: {interval}
@@ -130,9 +136,15 @@ def parse_timeseries(data_points: List[Dict], vault_info: Dict,
     Parse share price + TVL timeseries into flat rows.
     data_points is a list of {x: timestamp, y: value} from sharePriceNumber.
     """
-    # Build TVL lookup by timestamp
+    # Build TVL lookup by timestamp (totalAssetsUsd — may be inflated)
     tvl_points = vault_info.get("_tvl_points", [])
     tvl_lookup = {p["x"]: p["y"] for p in tvl_points if p.get("y") is not None}
+
+    # Build raw totalAssets lookup (BigInt, in token units — reliable)
+    raw_points = vault_info.get("_total_assets_raw_points", [])
+    raw_lookup = {p["x"]: p["y"] for p in raw_points if p.get("y") is not None}
+
+    decimals = vault_info.get("asset_decimals", 6)
 
     rows = []
     for pt in data_points:
@@ -142,6 +154,16 @@ def parse_timeseries(data_points: List[Dict], vault_info: Dict,
             continue
 
         tvl_usd = tvl_lookup.get(ts)
+
+        # Compute vault TVL from raw on-chain totalAssets
+        # This is the actual contract balance, immune to price-feed inflation
+        raw_assets = raw_lookup.get(ts)
+        total_assets_native = None
+        if raw_assets is not None:
+            try:
+                total_assets_native = float(raw_assets) / (10 ** decimals)
+            except (ValueError, TypeError):
+                total_assets_native = None
 
         rows.append({
             "vault_address": vault_info["address"],
@@ -154,6 +176,7 @@ def parse_timeseries(data_points: List[Dict], vault_info: Dict,
             "date": ts_formatter(ts),
             "share_price": share_price,
             "total_assets_usd": tvl_usd,
+            "total_assets_native": total_assets_native,
         })
 
     return rows
@@ -236,6 +259,20 @@ def compute_vault_stats(daily_rows: List[Dict], vault_info: Dict) -> Dict:
             tvl_points_sorted = sorted(tvl_points, key=lambda x: x[0])
             tvl_pre_depeg = tvl_points_sorted[0][1]
 
+    # ── Raw totalAssets-based TVL (reliable, immune to price-feed inflation) ──
+    # For stablecoin vaults (USDC, USDT), total_assets_native ≈ real TVL in USD
+    native_tvl_points = [(r["timestamp"], r["total_assets_native"]) for r in daily_rows
+                         if r.get("total_assets_native") is not None]
+    tvl_pre_depeg_native = None
+    if native_tvl_points:
+        pre_native = [(ts, v) for ts, v in native_tvl_points if ts <= nov3]
+        if pre_native:
+            pre_native.sort(key=lambda x: x[0])
+            tvl_pre_depeg_native = pre_native[-1][1]
+        elif native_tvl_points:
+            native_sorted = sorted(native_tvl_points, key=lambda x: x[0])
+            tvl_pre_depeg_native = native_sorted[0][1]
+
     # Estimated loss from share price drop (use pre-depeg TVL for most accurate estimate)
     estimated_loss_usd = None
     best_tvl = tvl_pre_depeg or tvl_at_peak
@@ -274,6 +311,7 @@ def compute_vault_stats(daily_rows: List[Dict], vault_info: Dict) -> Dict:
         "tvl_at_peak_usd": tvl_at_peak,
         "tvl_at_trough_usd": tvl_at_trough,
         "tvl_pre_depeg_usd": tvl_pre_depeg,
+        "tvl_pre_depeg_native": tvl_pre_depeg_native,
         "estimated_loss_usd": estimated_loss_usd,
 
         # Data quality
@@ -402,11 +440,17 @@ def main():
             hist = daily_data.get("historicalState") or {}
             sp_points = hist.get("sharePriceNumber") or []
             tvl_points = hist.get("totalAssetsUsd") or []
+            raw_points = hist.get("totalAssets") or []
             vault_info["_tvl_points"] = tvl_points
+            vault_info["_total_assets_raw_points"] = raw_points
+
+            # Store asset decimals for raw → native conversion
+            asset_info = daily_data.get("asset") or {}
+            vault_info["asset_decimals"] = int(asset_info.get("decimals", 6))
 
             daily_rows = parse_timeseries(sp_points, vault_info, ts_to_date)
             all_daily_rows.extend(daily_rows)
-            print(f"      ✅ {len(sp_points)} daily price points, {len(tvl_points)} TVL points")
+            print(f"      ✅ {len(sp_points)} daily price points, {len(tvl_points)} TVL points, {len(raw_points)} raw asset points")
 
             # ── Compute stats ──
             stats = compute_vault_stats(daily_rows, vault_info)
@@ -436,7 +480,9 @@ def main():
             hist = hourly_data.get("historicalState") or {}
             sp_points = hist.get("sharePriceNumber") or []
             tvl_points = hist.get("totalAssetsUsd") or []
+            raw_points = hist.get("totalAssets") or []
             vault_info["_tvl_points"] = tvl_points
+            vault_info["_total_assets_raw_points"] = raw_points
 
             hourly_rows = parse_timeseries(sp_points, vault_info, ts_to_datetime)
             all_hourly_rows.extend(hourly_rows)

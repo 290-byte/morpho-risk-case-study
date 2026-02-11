@@ -1,6 +1,7 @@
 """Section 1: Overview & Timeline — Case study introduction and key metrics."""
 
 import streamlit as st
+import pandas as pd
 import plotly.graph_objects as go
 from utils.data_loader import load_markets, load_vaults, load_timeline, load_asset_prices
 from utils.charts import apply_layout, SEVERITY_COLORS, RED, GREEN, BLUE, format_usd
@@ -8,10 +9,6 @@ from utils.charts import apply_layout, SEVERITY_COLORS, RED, GREEN, BLUE, format
 
 def render():
     st.title("Overview — xUSD / deUSD Depeg Event")
-    st.caption(
-        "November 2025: A stablecoin depeg cascaded through Morpho Blue markets, "
-        "exposing $4.2M in toxic collateral across 18 markets and 33 vaults on 3 chains."
-    )
 
     # ── Key Metrics ─────────────────────────────────────────
     markets = load_markets()
@@ -21,12 +18,22 @@ def render():
         st.error("⚠️ Core data not available — run the pipeline to generate `block1_markets_graphql.csv` and `block1_vaults_graphql.csv`.")
         return
 
+    total_bad_debt = markets["bad_debt_usd"].sum() if not markets.empty else 0
+    n_chains = markets["chain"].nunique() if not markets.empty and "chain" in markets.columns else 0
+    chains_list = ", ".join(sorted(markets["chain"].dropna().unique())) if n_chains > 0 else ""
+
+    st.caption(
+        f"November 2025: A stablecoin depeg cascaded through Morpho Blue markets, "
+        f"exposing {format_usd(total_bad_debt)} in toxic collateral across "
+        f"{len(markets)} markets and {len(vaults)} vaults on {n_chains} chains.".replace("$", "\\$")
+    )
+
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Toxic Markets", f"{len(markets)}" if not markets.empty else "—", help="Markets using xUSD, deUSD, or sdeUSD as collateral")
     c2.metric("Affected Vaults", f"{len(vaults)}" if not vaults.empty else "—", help="Unique vaults with current or historical exposure")
-    c3.metric("Total Bad Debt", "$3.64M", delta="-$3.64M", delta_color="inverse")
-    c4.metric("Chains Affected", "3", help="Ethereum, Arbitrum, Plume")
-    c5.metric("Liquidation Events", "0", help="Oracle masking prevented liquidations")
+    c3.metric("Total Bad Debt", format_usd(total_bad_debt), delta=f"-{format_usd(total_bad_debt)}", delta_color="inverse")
+    c4.metric("Chains Affected", str(n_chains), help=chains_list)
+    c5.metric("Liquidation Events", "0", help="Oracle masking prevented liquidations — see Liquidation Failure page")
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
@@ -81,6 +88,7 @@ def render():
 
     # ── Timeline ────────────────────────────────────────────
     st.subheader("Event Timeline")
+    st.caption("See **Background** page for full narrative and source links.")
 
     timeline = load_timeline()
     if not timeline.empty:
@@ -93,13 +101,24 @@ def render():
             "info": "🔵",
         }
 
+        has_link = "link" in timeline.columns
+        has_source = "source" in timeline.columns
+
         for _, row in timeline.iterrows():
             dot = dot_map.get(row.get("severity", "info"), "⚪")
             date_str = str(row["date"])[:10]
-            event_text = row["event"]
+            event_text = row["event"].replace("$", "\\$")
             category = row.get("category", "").replace("_", " ")
+
             st.markdown(f"**{date_str}** &nbsp; {dot} &nbsp; {event_text}")
-            st.caption(category)
+
+            # Source line
+            parts = [category]
+            if has_source and str(row.get("source", "")).strip() and str(row["source"]) != "nan":
+                parts.append(str(row["source"]))
+            if has_link and str(row.get("link", "")).strip() and str(row["link"]) != "nan":
+                parts.append(f"[Link]({row['link']})")
+            st.caption(" · ".join(parts))
             st.markdown("")
 
     # ── Exposure Breakdown ──────────────────────────────────
@@ -150,23 +169,43 @@ def render():
     st.subheader("Research Questions")
 
     with st.expander("**Q1:** What was the damage from the deUSD/xUSD situation? How much bad debt, and which vaults?"):
-        st.markdown("""
-        **$3.64M in protocol-level bad debt** across 18 markets on 3 chains, with the largest concentration
-        ($3.64M) in a single xUSD/USDC market on Arbitrum. The critical finding: **zero liquidation events** occurred
-        despite collateral values collapsing 95–99% — hardcoded Chainlink oracles continued reporting ≈$1.00,
-        completely masking the true risk.
+        # Compute Q1 values from data
+        _total_bd = markets["bad_debt_usd"].sum() if not markets.empty else 0
+        _n_mkts = len(markets) if not markets.empty else 0
+        _n_chains = markets["chain"].nunique() if not markets.empty and "chain" in markets.columns else 0
+        _largest_mkt = markets.loc[markets["bad_debt_usd"].idxmax(), "market_label"] if _total_bd > 0 else "?"
+        _largest_bd = markets["bad_debt_usd"].max() if _total_bd > 0 else 0
 
-        Two vaults suffered share-price damage: **MEV Capital USDC** (3.13% drawdown, $9.2M estimated loss)
-        and **Relend USDC** (98.4% drawdown, $42.6M estimated loss from peak TVL). The remaining 31 vaults
-        emerged without share-price impact, largely due to proactive curator exits before the depeg.
-        """)
+        # Damaged vaults from share price summary
+        _n_vaults = len(vaults) if not vaults.empty else 0
+        _damaged = vaults[vaults["share_price_drawdown"].abs() > 0.01] if not vaults.empty and "share_price_drawdown" in vaults.columns else pd.DataFrame()
+
+        _q1_text = (
+            f"**{format_usd(_total_bd)} in protocol-level bad debt** across {_n_mkts} markets "
+            f"on {_n_chains} chains, with the largest concentration ({format_usd(_largest_bd)}) in "
+            f"{_largest_mkt}. The critical finding: **zero liquidation events** occurred despite "
+            f"collateral values collapsing — hardcoded Chainlink oracles continued reporting ≈\\$1.00, "
+            f"completely masking the true risk.\n\n"
+        )
+        if not _damaged.empty:
+            _dam_details = []
+            for _, _d in _damaged.sort_values("share_price_drawdown").iterrows():
+                _dd_pct = abs(_d["share_price_drawdown"])
+                _loss = _d.get("tvl_pre_depeg_usd", _d.get("tvl_at_peak_usd", 0)) - _d.get("tvl_usd", 0)
+                _dam_details.append(f"**{_d['vault_name']}** ({_dd_pct:.1%} drawdown, {format_usd(_loss)} estimated loss)")
+            _q1_text += f"{len(_damaged)} vault{'s' if len(_damaged) > 1 else ''} suffered share-price damage: " + " and ".join(_dam_details)
+            _q1_text += f". The remaining {_n_vaults - len(_damaged)} vaults emerged without share-price impact, largely due to proactive curator exits."
+        _q1_text = _q1_text.replace("$", "\\$")
+        st.markdown(_q1_text)
 
     with st.expander("**Q2:** How could the Morpho protocol itself have been more resilient?"):
-        st.markdown("""
+        # Compute Q2 values from data
+        _n_instant_tl = len(vaults[vaults["timelock_days"] == 0]) if not vaults.empty and "timelock_days" in vaults.columns else 0
+        st.markdown(f"""
         Four structural vulnerabilities: **(1) Oracle architecture** — Chainlink adapters lacked circuit-breakers
-        or deviation thresholds, allowing stale $1.00 prices during 95% collapses. **(2) Timelock gaps** — 14 of 33
+        or deviation thresholds, allowing stale \\$1.00 prices during collateral collapses. **(2) Timelock gaps** — {_n_instant_tl} of {_n_vaults}
         vaults had instant (0-day) timelocks, enabling unchecked exposure changes. **(3) No automated exit
-        triggers** — curator-dependent response meant speed varied from 63 days early (Gauntlet) to 88 days
-        late (7 vaults still exposed). **(4) Contagion paths** — 4 vaults bridged toxic and clean markets,
+        triggers** — curator-dependent response meant speed varied significantly.
+        **(4) Contagion paths** — some vaults bridged toxic and clean markets,
         meaning depositors in "safe" markets unknowingly shared toxic exposure.
         """)

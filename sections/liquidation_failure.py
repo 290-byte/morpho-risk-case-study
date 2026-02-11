@@ -11,7 +11,7 @@ def render():
     st.title("Liquidation Failure Analysis")
     st.caption(
         "Zero liquidations occurred despite 95–99% collateral value collapse. "
-        "Hardcoded Chainlink oracles continued reporting ≈$1.00, completely masking the true risk."
+        "Hardcoded Chainlink oracles continued reporting ≈\\$1.00, completely masking the true risk."
     )
 
     ltv = load_ltv()
@@ -23,11 +23,36 @@ def render():
         return
 
     # ── Key Metrics ─────────────────────────────────────────
+    # Compute trapped borrow value from markets data
+    from utils.data_loader import load_markets as _load_mkts, load_bad_debt_detail
+    mkts = _load_mkts()
+    trapped_borrow = 0
+    if not mkts.empty and "borrow_usd" in mkts.columns and "utilization" in mkts.columns:
+        trapped = mkts[mkts["utilization"] > 0.99]
+        trapped_borrow = trapped["borrow_usd"].sum()
+
+    # Get collateral spot prices from bad debt detail
+    bd_detail = load_bad_debt_detail()
+    min_spot = None
+    max_spot = None
+    if not bd_detail.empty and "collateral_spot_price" in bd_detail.columns:
+        spots = bd_detail[bd_detail["L2_total_bad_debt_usd"] > 100]["collateral_spot_price"]
+        spots = spots[spots > 0]
+        if not spots.empty:
+            min_spot = spots.min()
+            max_spot = spots.max()
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Liquidation Events", "0", help="Zero across all 18 markets")
+    c1.metric("Liquidation Events", "0", help=f"Zero across all {len(mkts)} markets")
     c2.metric("Oracle Price Reported", "≈$1.00", help="Hardcoded oracle still reports peg")
-    c3.metric("Actual Market Price", "$0.002–0.05", help="95–99% below oracle price")
-    c4.metric("Trapped Borrow Value", "$54.3M", help="Debt that should have been liquidated")
+    if min_spot is not None:
+        c3.metric("Actual Market Price", f"${min_spot:.3f}–{max_spot:.3f}",
+                  help=f"{(1 - min_spot) * 100:.0f}–{(1 - max_spot) * 100:.0f}% below oracle price")
+    else:
+        c3.metric("Actual Market Price", "≈$0 (collapsed)",
+                  help="Spot prices collapsed to near-zero")
+    c4.metric("Trapped Borrow Value", format_usd(trapped_borrow),
+              help="Debt at >99% utilization that should have been liquidated")
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
@@ -120,8 +145,8 @@ def render():
 
         st.info(
             "**Why Oracle LTV shows as empty for some markets:** "
-            "LTV = Borrow Value / Collateral Value. When the oracle still reports collateral near $1 "
-            "but real market price is ~$0, the oracle-computed LTV stays extremely low — the protocol "
+            "LTV = Borrow Value / Collateral Value. When the oracle still reports collateral near \\$1 "
+            "but real market price is ~\\$0, the oracle-computed LTV stays extremely low — the protocol "
             "thinks positions are healthy. Meanwhile, using real spot prices, these positions are deeply "
             "underwater. This gap between oracle and reality is exactly why no liquidations fired."
         )
@@ -136,8 +161,8 @@ def render():
         with st.container(border=True):
             st.markdown("**1. Normal Operation**")
             st.markdown(
-                "Oracle price = $1.00\n\n"
-                "Market price = $1.00\n\n"
+                "Oracle price = \\$1.00\n\n"
+                "Market price = \\$1.00\n\n"
                 "LTV < LLTV → positions healthy"
             )
             st.caption("Both prices agree. No liquidations needed.")
@@ -146,8 +171,8 @@ def render():
         with st.container(border=True):
             st.markdown("**2. Depeg Occurs**")
             st.markdown(
-                "Oracle price = $1.00 (unchanged)\n\n"
-                "Market price → $0.05\n\n"
+                "Oracle price = \\$1.00 (unchanged)\n\n"
+                "Market price → \\$0.05\n\n"
                 "Oracle LTV still < LLTV"
             )
             st.caption("Oracle doesn't see the crash. Protocol thinks everything is fine.")
@@ -182,5 +207,5 @@ def render():
 
         st.caption(
             "High concentration means a single borrower controls most of the debt in several markets. "
-            "In the largest market ($49.8M sdeUSD/USDC), a single address holds 100% of borrows."
+            "In the largest market (\\$49.8M sdeUSD/USDC), a single address holds 100% of borrows."
         )

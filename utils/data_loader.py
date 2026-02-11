@@ -243,6 +243,108 @@ def load_vaults() -> pd.DataFrame:
 
     return df
 
+def load_bad_debt_detail() -> pd.DataFrame:
+    """
+    Source: block2_bad_debt_by_market.csv (from block2_query_markets.py)
+    Full bad-debt breakdown per market:
+      - Layer 2: unrealized (badDebt) + realized (realizedBadDebt)
+      - Oracle architecture: feed addresses, vault conversions, descriptions
+      - Layer 1: supply-borrow gap
+      - Layer 3: oracle price vs spot price
+      - Warnings: BadDebtUnrealized metadata with badDebtShare
+    """
+    df = _read("block2_bad_debt_by_market.csv")
+    if df.empty:
+        return df
+
+    # Build a friendly market label
+    if "market_label" not in df.columns:
+        df["market_label"] = df.apply(
+            lambda r: f"{r.get('collateral_symbol','?')}/{r.get('loan_symbol','?')}"
+                      f" ({r.get('chain','')})", axis=1)
+
+    # Ensure numeric for key columns
+    num_cols = [
+        "L2_bad_debt_usd", "L2_realized_bad_debt_usd", "L2_total_bad_debt_usd",
+        "L1_supply_usd", "L1_borrow_usd", "L1_gap_usd", "L1_collateral_usd",
+        "L3_oracle_price_raw", "L3_oracle_price_normalized",
+        "L3_oracle_spot_gap_pct", "L3_oracle_spot_gap_usd",
+        "oracle_base_vault_conversion", "oracle_quote_vault_conversion",
+        "supply_usd", "borrow_usd", "utilization", "liquidity_usd",
+        "collateral_spot_price", "loan_spot_price",
+        "lltv_pct", "oracle_ltv_pct", "true_ltv_pct",
+        "warning_bad_debt_share", "warning_bad_debt_usd",
+    ]
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # Oracle architecture: use pre-computed if available, else derive
+    ZERO_ADDR = "0x0000000000000000000000000000000000000000"
+    if "oracle_architecture" not in df.columns:
+        def _classify_oracle(r):
+            bf1 = str(r.get("oracle_base_feed_one", ""))
+            bv  = str(r.get("oracle_base_vault", ""))
+            has_feed = bf1 not in ("", "nan", ZERO_ADDR)
+            has_vault = bv not in ("", "nan", ZERO_ADDR)
+            if has_feed and has_vault:
+                return "feed+vault"
+            if has_feed:
+                return "feed-based"
+            if has_vault:
+                return "vault-based"
+            return "fixed-price"
+        df["oracle_architecture"] = df.apply(_classify_oracle, axis=1)
+
+    # Normalize oracle price: use pre-computed if available, else derive
+    if "oracle_price_normalized" not in df.columns:
+        def _normalize_price(r):
+            raw = float(r.get("L3_oracle_price_raw", 0) or 0)
+            sf = float(r.get("oracle_scale_factor", 1) or 1)
+            if sf > 0 and raw > 0:
+                return raw / sf
+            return 0.0
+        df["oracle_price_normalized"] = df.apply(_normalize_price, axis=1)
+
+    # Build oracle description summary (human-readable)
+    def _oracle_desc_summary(r):
+        parts = []
+        for col in ["oracle_base_feed_one_desc", "feed_base_one_desc",
+                     "oracle_base_feed_two_desc", "feed_base_two_desc",
+                     "oracle_quote_feed_one_desc", "feed_quote_one_desc",
+                     "feed_base_vault_desc", "oracle_base_vault_vendor",
+                     "feed_quote_vault_desc", "oracle_quote_vault_vendor"]:
+            val = str(r.get(col, ""))
+            if val and val != "nan" and val != "":
+                parts.append(val)
+        return " | ".join(parts) if parts else ""
+    if "oracle_desc_summary" not in df.columns:
+        df["oracle_desc_summary"] = df.apply(_oracle_desc_summary, axis=1)
+
+    return df
+
+
+def load_reallocations() -> pd.DataFrame:
+    """
+    Source: block3_reallocations.csv (from block3_curator_response_B.py)
+    Vault reallocation events: assets moved in/out of markets by curators.
+    """
+    df = _read("block3_reallocations.csv")
+    if df.empty:
+        return df
+
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    if "assets" in df.columns:
+        df["assets"] = pd.to_numeric(df["assets"], errors="coerce").fillna(0)
+    if "shares" in df.columns:
+        df["shares"] = pd.to_numeric(df["shares"], errors="coerce").fillna(0)
+
+    return df
+
+
 def load_share_prices() -> pd.DataFrame:
     """
     Source: block2_share_prices_daily.csv

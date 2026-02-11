@@ -15,4 +15,5 @@ docker-compose.yml
 dev.sh
 morpho-risk-case-study.tar.gz
 morpho-risk-case-study1.tar.gz
-data/*.*
+data/snapshot.txt
+test

@@ -64,22 +64,42 @@ def render():
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
+    # Pre-compute bridge display data (used in both Exposure Distribution and Bridge cards)
+    display_bridges_early = actual_bridges if not actual_bridges.empty else bridges
+
     # ── Exposure Distribution ───────────────────────────────
     st.subheader("Exposure Distribution")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if not exposure.empty and len(exposure) > 1:
-            fig = donut_chart(
-                exposure["count"].tolist(),
-                exposure["category"].tolist(),
-                colors=[BLUE, ORANGE, RED, "#991b1b"][:len(exposure)],
-                height=350,
-            )
+        # Show toxic vs clean exposure per bridge vault as stacked horizontal bars
+        if not display_bridges_early.empty:
+            vault_names = []
+            toxic_vals = []
+            clean_vals = []
+            for _, b in display_bridges_early.iterrows():
+                vault_names.append(b.get("vault_name", "Unknown"))
+                toxic_vals.append(float(b.get("toxic_exposure_usd", b.get("toxic_supply_usd", 0)) or 0))
+                clean_vals.append(float(b.get("clean_exposure_usd", b.get("clean_supply_usd", 0)) or 0))
+
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                y=vault_names, x=toxic_vals, name="Toxic Exposure",
+                orientation="h", marker_color=RED,
+                text=[format_usd(v) for v in toxic_vals], textposition="inside",
+            ))
+            fig.add_trace(go.Bar(
+                y=vault_names, x=clean_vals, name="Clean Exposure",
+                orientation="h", marker_color=GREEN,
+                text=[format_usd(v) for v in clean_vals], textposition="inside",
+            ))
+            fig = apply_layout(fig, height=max(250, 80 * len(vault_names)))
+            fig.update_layout(barmode="stack", xaxis_title="Exposure (USD)", yaxis_title="",
+                              xaxis_tickformat="$,.0f",
+                              legend=dict(orientation="h", yanchor="bottom", y=1.02))
             st.plotly_chart(fig, use_container_width=True)
         elif not exposure.empty:
-            # Only one category — bar chart is more useful than a 100% donut
             fig = go.Figure(go.Bar(
                 x=exposure["category"],
                 y=exposure["count"],
@@ -125,7 +145,7 @@ def render():
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
     st.subheader("Contagion Bridges — Toxic ↔ Clean")
 
-    display_bridges = actual_bridges if not actual_bridges.empty else bridges
+    display_bridges = display_bridges_early
 
     if not display_bridges.empty:
         for _, b in display_bridges.iterrows():
@@ -146,6 +166,11 @@ def render():
             "**Risk:** Depositors who supplied to these vaults thinking they were only exposed to "
             "clean, safe markets actually shared losses from the toxic market positions. "
             "The vault's share price socializes gains AND losses across all depositors."
+        )
+        st.caption(
+            "**Note:** Appearing here means the vault had toxic *exposure* (the risk existed), not necessarily "
+            "realized loss. Some bridge vaults exited toxic positions before bad debt accrued. "
+            "See the Bad Debt Analysis page for vaults where losses actually materialized in share prices."
         )
     else:
         st.info("No contagion bridges detected — all vaults had purely toxic exposure.")
@@ -173,6 +198,45 @@ def render():
                 df_show = df_show.sort_values("total_supply_usd", ascending=False)
             st.dataframe(df_show, use_container_width=True, hide_index=True)
 
+    # ── Key Finding: Credit vs. Liquidity Contagion ──────────
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+    st.subheader("Key Finding: Credit Risk Isolated, Liquidity Risk Propagated")
+
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        with st.container(border=True):
+            st.markdown("**✅ Credit Risk — Contained**")
+            st.markdown(
+                "Bad debt stayed within specific vaults. The vast majority of public vaults had "
+                "zero permanent capital loss. Morpho's isolated market architecture "
+                "prevented bad debt from spreading to unrelated depositors."
+            )
+            st.caption("Only 2 vaults showed permanent share price haircuts in on-chain data: Relend USDC (Eth, -98.4%), "
+                       "MEV Capital USDC (Eth, -3.5%). A third vault (MEV Capital USDC, Arb) used V1.1 mechanics "
+                       "that mask bad debt — see Bad Debt Analysis for the anomaly detection.")
+
+    with col_b:
+        with st.container(border=True):
+            st.markdown("**⚠️ Liquidity Risk — Propagated**")
+            st.markdown(
+                "Gauntlet's Balanced and Frontier vaults had *zero* toxic exposure but "
+                "experienced near-zero withdrawable liquidity for ~6 hours on Nov 4. "
+                "When toxic vaults pulled liquidity to service panic withdrawals, they "
+                "drained shared underlying markets that clean vaults also relied on."
+            )
+            st.caption("Source: Gauntlet November 2025 market risk report. "
+                       "Stani Kulechov (Aave): \"One curator's stress becomes everyone's problem.\"")
+
+    st.info(
+        "**The nuanced answer to Q2:** Markets ARE isolated at the protocol level for credit risk. "
+        "But curators create shared liquidity risk through overlapping market allocations. "
+        "Multiple vaults supplying to the same underlying Morpho market means one vault's panic "
+        "withdrawal reduces available liquidity for all other vaults in that market. "
+        "An arxiv paper (Dec 2025) formalized this: *\"Isolation applies primarily to credit "
+        "rather than liquidity risk.\"*"
+    )
+
     # ── Q2 Framework ────────────────────────────────────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
     st.subheader("Q2: How Could Morpho Be More Resilient?")
@@ -180,112 +244,110 @@ def render():
     recs = [
         ("Oracle Circuit Breakers",
          "Implement deviation thresholds that flag or pause markets when oracle price "
-         "diverges >5% from on-chain TWAP/DEX prices."),
-        ("Automated Exposure Caps",
-         "Protocol-level limits on single-collateral concentration across vaults, "
-         "triggering automatic cap reductions."),
-        ("Mandatory Timelocks",
-         "Require minimum timelock periods (e.g., 24h) for all vaults to prevent instant, "
-         "unchecked allocation changes."),
+         "diverges >5% from on-chain TWAP/DEX prices. The Steakhouse MetaOracle governance "
+         "proposal already moves in this direction.",
+         "HIGH"),
+        ("Timelocks — Double-Edged Sword",
+         "Timelocks (e.g., MEV Capital's 3-day timelock) were designed to prevent "
+         "unchecked allocation changes, but during the crisis they DELAYED removal of "
+         "toxic markets, trapping depositor funds for days. 0-day timelock vaults (Relend) "
+         "suffered instant, catastrophic loss. The optimal answer isn't simply 'longer' or "
+         "'shorter' — it's timelocks paired with emergency circuit breakers that can bypass "
+         "the delay when oracle deviations exceed thresholds.",
+         "NUANCED"),
+        ("Liquidity Isolation Mechanisms",
+         "Address the liquidity contagion vector: rate-limit withdrawals from shared markets "
+         "during stress, or implement per-vault liquidity reserves to prevent one vault's "
+         "panic from draining shared pools. Gauntlet's 6-hour illiquidity event shows this "
+         "is a real, not theoretical, risk.",
+         "HIGH"),
         ("Contagion Disclosure",
-         "Surface cross-market exposure data in the vault UI so depositors understand "
-         "their actual risk profile."),
-        ("Stress Testing Framework",
-         "Regular simulated depeg scenarios to validate that liquidation mechanisms "
-         "would actually trigger."),
+         "Surface cross-market exposure data in the vault UI so depositors can see which "
+         "other vaults share their underlying markets. Currently invisible to most users.",
+         "MEDIUM"),
+        ("V1.1 Bad Debt Transparency",
+         "V1.1 vaults mask bad debt by not auto-realizing it in share prices. As shown in the MEV Capital USDC (Arb) "
+         "example, the share price can continue rising while the vault carries unrealized losses — "
+         "only the massive TVL drop reveals the problem. Require explicit disclosure when vaults "
+         "carry unrealized bad debt from toxic markets.",
+         "HIGH"),
     ]
 
-    for title, desc in recs:
+    for title, desc, priority in recs:
         with st.container(border=True):
-            st.markdown(f"**{title}**")
+            priority_colors = {"HIGH": "🔴", "MEDIUM": "🟡", "NUANCED": "🟠"}
+            st.markdown(f"**{priority_colors.get(priority, '')} {title}**")
             st.caption(desc)
 
 
 def _render_bridge_network(bridges: pd.DataFrame, n_toxic_markets: int):
-    """Improved bridge network: horizontal flow layout with clear labels."""
-    fig = go.Figure()
+    """Sankey flow diagram: Toxic Markets → Bridge Vaults → Clean Markets."""
+    nodes_labels = []
+    nodes_colors = []
+    source = []
+    target = []
+    value = []
+    link_colors = []
 
-    n = len(bridges)
-    y_positions = list(range(n))
-    y_center = (n - 1) / 2
+    # Node 0: Toxic Markets (source)
+    nodes_labels.append(f"Toxic Markets ({n_toxic_markets})")
+    nodes_colors.append(RED)
 
-    # Central toxic node (left)
-    fig.add_trace(go.Scatter(
-        x=[0], y=[y_center], mode="markers+text",
-        marker=dict(size=50, color=RED, line=dict(width=2, color="#7f1d1d")),
-        text=[f"<b>Toxic Markets</b><br>({n_toxic_markets})"],
-        textposition="middle center",
-        textfont=dict(size=10, color="white"),
-        showlegend=False, hoverinfo="skip",
+    # Add vault nodes and clean market nodes
+    for i, (_, b) in enumerate(bridges.iterrows()):
+        vault_name = b.get("vault_name", f"Vault {i+1}")
+        toxic_exp = float(b.get("toxic_exposure_usd", b.get("toxic_supply_usd", 0)) or 0)
+        clean_mkts = b.get("clean_markets", b.get("n_clean_markets", 0))
+        clean_exp = float(b.get("clean_exposure_usd", b.get("clean_supply_usd", 0)) or 0)
+
+        vault_idx = len(nodes_labels)
+        nodes_labels.append(f"{vault_name}")
+        nodes_colors.append(ORANGE)
+
+        clean_idx = len(nodes_labels)
+        nodes_labels.append(f"Clean ({clean_mkts} mkts)")
+        nodes_colors.append(GREEN)
+
+        # Link: Toxic → Vault
+        flow_val = max(toxic_exp, 1)  # at least 1 for visibility
+        source.append(0)
+        target.append(vault_idx)
+        value.append(flow_val)
+        link_colors.append("rgba(239,68,68,0.3)")  # red semi-transparent
+
+        # Link: Vault → Clean
+        clean_val = max(clean_exp, 1)
+        source.append(vault_idx)
+        target.append(clean_idx)
+        value.append(clean_val)
+        link_colors.append("rgba(34,197,94,0.3)")  # green semi-transparent
+
+    fig = go.Figure(go.Sankey(
+        arrangement="snap",
+        node=dict(
+            pad=30,
+            thickness=30,
+            label=nodes_labels,
+            color=nodes_colors,
+            line=dict(color="#1e293b", width=1),
+        ),
+        link=dict(
+            source=source,
+            target=target,
+            value=value,
+            color=link_colors,
+        ),
     ))
 
-    for i, (_, b) in enumerate(bridges.iterrows()):
-        vault_name = b.get("vault_name", "?")
-        toxic_exp = b.get("toxic_exposure_usd", b.get("toxic_supply_usd", 0))
-        clean_mkts = b.get("clean_markets", b.get("n_clean_markets", 0))
-        clean_exp = b.get("clean_exposure_usd", b.get("clean_supply_usd", 0))
-
-        y = y_positions[i]
-        vx = 3    # vault x
-        cx = 5.5  # clean x
-
-        # Edge: toxic → vault (red dashed)
-        fig.add_trace(go.Scatter(
-            x=[0.5, vx - 0.3], y=[y_center + (y - y_center) * 0.3, y],
-            mode="lines",
-            line=dict(color=RED, width=2, dash="dot"),
-            showlegend=False, hoverinfo="skip",
-        ))
-
-        # Vault node (orange, sized by exposure)
-        size_factor = max(22, min(45, 22 + (toxic_exp / 500_000)))
-        fig.add_trace(go.Scatter(
-            x=[vx], y=[y], mode="markers+text",
-            marker=dict(size=size_factor, color=ORANGE,
-                        line=dict(width=1.5, color="#92400e")),
-            text=[f"<b>{vault_name}</b><br>{format_usd(toxic_exp)}"],
-            textposition="top center",
-            textfont=dict(size=9),
-            showlegend=False,
-            hovertemplate=(
-                f"<b>{vault_name}</b><br>"
-                f"Toxic exposure: {format_usd(toxic_exp)}<br>"
-                f"Clean exposure: {format_usd(clean_exp)}<extra></extra>"
-            ),
-        ))
-
-        # Edge: vault → clean (green)
-        fig.add_trace(go.Scatter(
-            x=[vx + 0.3, cx - 0.2], y=[y, y],
-            mode="lines",
-            line=dict(color=GREEN, width=1.5),
-            showlegend=False, hoverinfo="skip",
-        ))
-
-        # Clean node (green)
-        fig.add_trace(go.Scatter(
-            x=[cx], y=[y], mode="markers+text",
-            marker=dict(size=24, color=GREEN,
-                        line=dict(width=1, color="#166534")),
-            text=[f"Clean<br>({clean_mkts})"],
-            textposition="middle center",
-            textfont=dict(size=8, color="white"),
-            showlegend=False,
-            hovertemplate=f"{clean_mkts} clean markets<br>{format_usd(clean_exp)} clean exposure<extra></extra>",
-        ))
-
-    fig = apply_layout(fig, height=max(350, 150 * n))
-    fig.update_xaxes(visible=False, range=[-1.5, 7])
-    fig.update_yaxes(visible=False, range=[-1, n])
+    fig = apply_layout(fig, height=max(350, 120 * len(bridges)))
     fig.update_layout(
-        annotations=[
-            dict(x=0, y=-0.7, text="<b>Toxic Collateral</b>",
-                 showarrow=False, font=dict(size=11, color=RED)),
-            dict(x=3, y=-0.7, text="<b>Bridge Vaults</b>",
-                 showarrow=False, font=dict(size=11, color=ORANGE)),
-            dict(x=5.5, y=-0.7, text="<b>Clean Markets</b>",
-                 showarrow=False, font=dict(size=11, color=GREEN)),
-        ]
+        font=dict(size=13, color="#1e293b", family="Inter, Helvetica Neue, sans-serif"),
+        margin=dict(l=20, r=20, t=30, b=20),
     )
 
     st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "**Reading the flow:** Red links show toxic collateral exposure flowing into bridge vaults. "
+        "Green links show those same vaults also holding clean market positions — depositors in the "
+        "clean side unknowingly share the vault's pooled accounting with toxic positions."
+    )
