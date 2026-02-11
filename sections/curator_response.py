@@ -34,7 +34,6 @@ def render():
     st.subheader("Response Timeline")
 
     vaults["response_date"] = pd.to_datetime(vaults["response_date"])
-    depeg_date = pd.Timestamp("2025-11-04")
 
     fig = go.Figure()
 
@@ -50,11 +49,16 @@ def render():
             hoverinfo="text",
         ))
 
-    # Depeg line
-    import pandas as pd_dt
-    fig.add_vline(x=pd_dt.Timestamp("2025-11-04"), line_dash="dash", line_color=RED, opacity=0.7)
-    fig.add_annotation(x=pd_dt.Timestamp("2025-11-04"), y=1, yref="paper", text="DEPEG",
-                       showarrow=False, font=dict(color=RED, size=11), yshift=10)
+    # Depeg lines — two separate events
+    fig.add_vline(x=pd.Timestamp("2025-11-04"), line_dash="dash", line_color=RED, opacity=0.7)
+    fig.add_annotation(x=pd.Timestamp("2025-11-04"), y=1, yref="paper",
+                       text="xUSD depeg (Nov 4)",
+                       showarrow=False, font=dict(color=RED, size=10), yshift=14)
+
+    fig.add_vline(x=pd.Timestamp("2025-11-06"), line_dash="dash", line_color="#9333ea", opacity=0.7)
+    fig.add_annotation(x=pd.Timestamp("2025-11-06"), y=1, yref="paper",
+                       text="deUSD depeg (Nov 6)",
+                       showarrow=False, font=dict(color="#9333ea", size=10), yshift=-6)
 
     fig = apply_layout(fig, height=550)
     fig.update_xaxes(title="Response Date", range=["2025-08-15", "2026-02-15"])
@@ -73,21 +77,30 @@ def render():
         total_tvl = subset["tvl_usd"].sum()
 
         with st.expander(
-            f"**{response_class}** — {len(subset)} vaults, {format_usd(total_tvl)} TVL",
+            f"**{response_class}** — {len(subset)} vaults, {format_usd(total_tvl)} current TVL",
             expanded=(response_class == "PROACTIVE"),
         ):
-            st.dataframe(
-                subset[["vault_name", "chain", "curator", "tvl_usd", "days_before_depeg",
-                         "timelock_days", "share_price_drawdown"]],
-                column_config={
+            display_cols = ["vault_name", "chain", "curator", "tvl_usd", "days_before_depeg",
+                            "timelock_days", "share_price_drawdown"]
+            col_config = {
                     "vault_name": "Vault",
                     "chain": "Chain",
                     "curator": "Curator",
-                    "tvl_usd": st.column_config.NumberColumn("TVL", format="$%,.0f"),
+                    "tvl_usd": st.column_config.NumberColumn("Current TVL", format="$%,.0f"),
                     "days_before_depeg": st.column_config.NumberColumn("Days Before Depeg", format="%+.1f"),
                     "timelock_days": st.column_config.NumberColumn("Timelock (days)", format="%.0f"),
                     "share_price_drawdown": st.column_config.NumberColumn("SP Drawdown", format="%.2%"),
-                },
+            }
+            # Add pre-depeg TVL column if available
+            if "tvl_pre_depeg_usd" in subset.columns and subset["tvl_pre_depeg_usd"].sum() > 0:
+                display_cols.insert(4, "tvl_pre_depeg_usd")
+                col_config["tvl_pre_depeg_usd"] = st.column_config.NumberColumn(
+                    "Pre-depeg TVL", format="$%,.0f"
+                )
+
+            st.dataframe(
+                subset[display_cols],
+                column_config=col_config,
                 hide_index=True,
                 use_container_width=True,
             )

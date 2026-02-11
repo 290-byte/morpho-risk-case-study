@@ -281,73 +281,87 @@ def render():
 
 
 def _render_bridge_network(bridges: pd.DataFrame, n_toxic_markets: int):
-    """Sankey flow diagram: Toxic Markets → Bridge Vaults → Clean Markets."""
-    nodes_labels = []
-    nodes_colors = []
-    source = []
-    target = []
-    value = []
-    link_colors = []
+    """Network cluster diagram: Toxic Markets ← Bridge Vaults → Clean Markets."""
 
-    # Node 0: Toxic Markets (source)
-    nodes_labels.append(f"Toxic Markets ({n_toxic_markets})")
-    nodes_colors.append(RED)
+    n = len(bridges)
+    if n == 0:
+        st.info("No bridge vaults detected.")
+        return
 
-    # Add vault nodes and clean market nodes
+    fig = go.Figure()
+
+    # Layout: 3 columns — toxic nodes left (x=0), vaults center (x=1), clean nodes right (x=2)
+    # Spread vaults vertically
+    vault_ys = [(i / max(n - 1, 1)) for i in range(n)] if n > 1 else [0.5]
+
+    # -- Toxic market node (single cluster, left) --
+    fig.add_trace(go.Scatter(
+        x=[0], y=[0.5], mode="markers+text",
+        marker=dict(size=40, color=RED, line=dict(color="#1e293b", width=2)),
+        text=[f"Toxic Markets<br>({n_toxic_markets})"],
+        textposition="middle left", textfont=dict(size=12, color=RED, family="Inter"),
+        hoverinfo="text", hovertext=f"{n_toxic_markets} toxic collateral markets (xUSD, deUSD, sdeUSD)",
+        showlegend=False,
+    ))
+
     for i, (_, b) in enumerate(bridges.iterrows()):
         vault_name = b.get("vault_name", f"Vault {i+1}")
         toxic_exp = float(b.get("toxic_exposure_usd", b.get("toxic_supply_usd", 0)) or 0)
-        clean_mkts = b.get("clean_markets", b.get("n_clean_markets", 0))
+        clean_mkts = int(b.get("clean_markets", b.get("n_clean_markets", 0)) or 0)
         clean_exp = float(b.get("clean_exposure_usd", b.get("clean_supply_usd", 0)) or 0)
+        vy = vault_ys[i]
 
-        vault_idx = len(nodes_labels)
-        nodes_labels.append(f"{vault_name}")
-        nodes_colors.append(ORANGE)
+        # -- Red line: Toxic → Vault --
+        line_width = max(1.5, min(8, toxic_exp / 500_000))  # scale by exposure
+        fig.add_trace(go.Scatter(
+            x=[0.08, 0.92], y=[0.5, vy], mode="lines",
+            line=dict(color="rgba(239,68,68,0.45)", width=line_width),
+            hoverinfo="skip", showlegend=False,
+        ))
 
-        clean_idx = len(nodes_labels)
-        nodes_labels.append(f"Clean ({clean_mkts} mkts)")
-        nodes_colors.append(GREEN)
+        # -- Vault node (center) --
+        vault_size = max(20, min(45, 20 + toxic_exp / 200_000))
+        fig.add_trace(go.Scatter(
+            x=[1], y=[vy], mode="markers+text",
+            marker=dict(size=vault_size, color=ORANGE, line=dict(color="#1e293b", width=1.5)),
+            text=[vault_name],
+            textposition="top center", textfont=dict(size=11, color="#1e293b", family="Inter"),
+            hoverinfo="text",
+            hovertext=f"<b>{vault_name}</b><br>Toxic exposure: ${toxic_exp:,.0f}<br>Clean markets: {clean_mkts}<br>Clean exposure: ${clean_exp:,.0f}",
+            showlegend=False,
+        ))
 
-        # Link: Toxic → Vault
-        flow_val = max(toxic_exp, 1)  # at least 1 for visibility
-        source.append(0)
-        target.append(vault_idx)
-        value.append(flow_val)
-        link_colors.append("rgba(239,68,68,0.3)")  # red semi-transparent
+        # -- Green line: Vault → Clean cluster --
+        green_width = max(1, min(6, clean_exp / 500_000)) if clean_exp > 0 else 1
+        fig.add_trace(go.Scatter(
+            x=[1.08, 1.92], y=[vy, vy], mode="lines",
+            line=dict(color="rgba(34,197,94,0.45)", width=green_width),
+            hoverinfo="skip", showlegend=False,
+        ))
 
-        # Link: Vault → Clean
-        clean_val = max(clean_exp, 1)
-        source.append(vault_idx)
-        target.append(clean_idx)
-        value.append(clean_val)
-        link_colors.append("rgba(34,197,94,0.3)")  # green semi-transparent
+        # -- Clean market node (right) --
+        clean_size = max(16, min(35, 16 + clean_mkts * 2))
+        fig.add_trace(go.Scatter(
+            x=[2], y=[vy], mode="markers+text",
+            marker=dict(size=clean_size, color=GREEN, line=dict(color="#1e293b", width=1)),
+            text=[f"{clean_mkts} clean"],
+            textposition="middle right", textfont=dict(size=10, color=GREEN, family="Inter"),
+            hoverinfo="text",
+            hovertext=f"{clean_mkts} clean markets · ${clean_exp:,.0f} exposure",
+            showlegend=False,
+        ))
 
-    fig = go.Figure(go.Sankey(
-        arrangement="snap",
-        node=dict(
-            pad=30,
-            thickness=30,
-            label=nodes_labels,
-            color=nodes_colors,
-            line=dict(color="#1e293b", width=1),
-        ),
-        link=dict(
-            source=source,
-            target=target,
-            value=value,
-            color=link_colors,
-        ),
-    ))
-
-    fig = apply_layout(fig, height=max(350, 120 * len(bridges)))
+    fig = apply_layout(fig, height=max(350, 130 * n))
     fig.update_layout(
-        font=dict(size=13, color="#1e293b", family="Inter, Helvetica Neue, sans-serif"),
-        margin=dict(l=20, r=20, t=30, b=20),
+        xaxis=dict(visible=False, range=[-0.4, 2.7]),
+        yaxis=dict(visible=False, range=[-0.15, 1.15]),
+        margin=dict(l=10, r=10, t=10, b=10),
+        plot_bgcolor="rgba(0,0,0,0)",
     )
 
     st.plotly_chart(fig, use_container_width=True)
     st.caption(
-        "**Reading the flow:** Red links show toxic collateral exposure flowing into bridge vaults. "
-        "Green links show those same vaults also holding clean market positions — depositors in the "
-        "clean side unknowingly share the vault's pooled accounting with toxic positions."
+        "**Reading the network:** Red lines connect toxic collateral markets (left) to bridge vaults (center). "
+        "Green lines show those same vaults also serving clean markets (right). Node size reflects exposure amount. "
+        "Depositors in the clean markets unknowingly share the vault's pooled accounting with toxic positions."
     )
