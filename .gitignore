@@ -17,3 +17,9 @@ morpho-risk-case-study.tar.gz
 morpho-risk-case-study1.tar.gz
 data/snapshot.txt
 test
+pdf_export/
+morpho_case_study_dashboard.pdf
+export_dashboard_pdf.py
+morpho_case_study_summary.pdf
+morpho_case_study_dashboard.pdf
+requirements.txt

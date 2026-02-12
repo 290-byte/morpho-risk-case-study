@@ -4,7 +4,7 @@ import math
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from utils.data_loader import load_bridges, load_exposure_summary, load_vaults, load_csv
+from utils.data_loader import load_bridges, load_exposure_summary, load_vaults, load_csv, load_share_prices
 from utils.charts import apply_layout, donut_chart, RED, BLUE, ORANGE, GREEN, YELLOW, format_usd
 
 
@@ -132,8 +132,8 @@ def render():
             parts.append(
                 f"\nMost critically, **{n_bridge_actual} vault{'s' if n_bridge_actual != 1 else ''} "
                 f"act{'s' if n_bridge_actual == 1 else ''} as contagion bridges** — they hold "
-                f"both toxic and clean market positions, meaning depositors in \"safe\" markets "
-                f"unknowingly share exposure to toxic collateral through the vault's pooled accounting."
+                f"both toxic and clean market positions, meaning depositors in unaffected markets "
+                f"may unknowingly share exposure to toxic collateral through the vault's pooled accounting."
             )
 
         if not parts[1:]:
@@ -163,9 +163,9 @@ def render():
                 cols[4].metric("Clean $", format_usd(clean_exp))
 
         st.warning(
-            "**Risk:** Depositors who supplied to these vaults thinking they were only exposed to "
-            "clean, safe markets actually shared losses from the toxic market positions. "
-            "The vault's share price socializes gains AND losses across all depositors."
+            "**Risk:** Depositors who supplied to these vaults expecting exposure only to "
+            "clean markets actually shared the vault's pooled accounting with toxic positions. "
+            "Share price socializes gains and losses across all depositors."
         )
         st.caption(
             "**Note:** Appearing here means the vault had toxic *exposure* (the risk existed), not necessarily "
@@ -202,6 +202,40 @@ def render():
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
     st.subheader("Key Finding: Credit Risk Isolated, Liquidity Risk Propagated")
 
+    # Compute damaged vault details from share price data for dynamic caption
+    share_prices = load_share_prices()
+    damaged_vaults_text = ""
+    if not share_prices.empty:
+        group_key = "vault_address" if "vault_address" in share_prices.columns else "vault_name"
+        damaged_list = []
+        for gid, vp in share_prices.groupby(group_key):
+            vp = vp.sort_values("date")
+            vault_name = vp["vault_name"].iloc[0] if "vault_name" in vp.columns else str(gid)
+            chain = vp["chain"].iloc[0] if "chain" in vp.columns else ""
+            cummax = vp["share_price"].cummax()
+            dd = ((vp["share_price"] - cummax) / cummax).min()
+            if dd < -0.01:
+                chain_short = chain[:3].title() if chain else ""
+                damaged_list.append(f"{vault_name} ({chain_short}, {dd:.1%})")
+        if damaged_list:
+            damaged_vaults_text = ", ".join(damaged_list)
+
+    # Check for V1.1 vaults (masked bad debt) from vault data
+    v11_note = ""
+    if not vaults.empty:
+        mev_arb = vaults[
+            vaults["vault_name"].str.contains("MEV Capital", case=False, na=False) &
+            vaults["vault_name"].str.contains("USDC", case=False, na=False) &
+            vaults.get("chain", pd.Series(dtype=str)).str.contains("arb", case=False, na=False)
+        ]
+        if not mev_arb.empty:
+            v = mev_arb.iloc[0]
+            v11_note = (
+                f" An additional vault ({v['vault_name']}, {v.get('chain', 'Arbitrum')[:3].title()}) "
+                f"uses V1.1 mechanics that mask bad debt in share price — "
+                f"see Bad Debt Analysis for the anomaly detection."
+            )
+
     col_a, col_b = st.columns(2)
 
     with col_a:
@@ -212,28 +246,35 @@ def render():
                 "zero permanent capital loss. Morpho's isolated market architecture "
                 "prevented bad debt from spreading to unrelated depositors."
             )
-            st.caption("Only 2 vaults showed permanent share price haircuts in on-chain data: Relend USDC (Eth, -98.4%), "
-                       "MEV Capital USDC (Eth, -3.5%). A third vault (MEV Capital USDC, Arb) used V1.1 mechanics "
-                       "that mask bad debt — see Bad Debt Analysis for the anomaly detection.")
+            credit_caption = ""
+            if damaged_vaults_text:
+                credit_caption = f"Vaults with permanent share price impact: {damaged_vaults_text}."
+            if v11_note:
+                credit_caption += v11_note
+            if credit_caption:
+                st.caption(credit_caption)
 
     with col_b:
         with st.container(border=True):
             st.markdown("**⚠️ Liquidity Risk — Propagated**")
             st.markdown(
-                "Gauntlet's Balanced and Frontier vaults had *zero* toxic exposure but "
-                "experienced near-zero withdrawable liquidity for ~6 hours on Nov 4. "
-                "When toxic vaults pulled liquidity to service panic withdrawals, they "
-                "drained shared underlying markets that clean vaults also relied on."
+                "Vaults with zero toxic exposure (e.g. Gauntlet's Balanced and Frontier vaults) "
+                "experienced near-zero withdrawable liquidity for approximately 6 hours on November 4. "
+                "When stressed vaults drew down liquidity to service withdrawals, they "
+                "reduced available liquidity in shared underlying markets that clean vaults also relied on."
             )
-            st.caption("Source: Gauntlet November 2025 market risk report. "
-                       "Stani Kulechov (Aave): \"One curator's stress becomes everyone's problem.\"")
+            st.caption(
+                "Source: Gauntlet November 2025 market risk report. "
+                "An academic analysis (arXiv, Dec 2025) formalized this pattern as "
+                "curator-level liquidity contagion across shared market allocations."
+            )
 
     st.info(
         "**The nuanced answer to Q2:** Markets ARE isolated at the protocol level for credit risk. "
         "But curators create shared liquidity risk through overlapping market allocations. "
-        "Multiple vaults supplying to the same underlying Morpho market means one vault's panic "
+        "Multiple vaults supplying to the same underlying Morpho market means one vault's stress-driven "
         "withdrawal reduces available liquidity for all other vaults in that market. "
-        "An arxiv paper (Dec 2025) formalized this: *\"Isolation applies primarily to credit "
+        "An arxiv paper (Dec 2025) formalized this distinction: *\"Isolation applies primarily to credit "
         "rather than liquidity risk.\"*"
     )
 
@@ -249,27 +290,29 @@ def render():
          "HIGH"),
         ("Timelocks — Double-Edged Sword",
          "Timelocks (e.g., MEV Capital's 3-day timelock) were designed to prevent "
-         "unchecked allocation changes, but during the crisis they DELAYED removal of "
+         "unchecked allocation changes, but during the crisis they delayed removal of "
          "toxic markets, trapping depositor funds for days. 0-day timelock vaults (Relend) "
-         "suffered instant, catastrophic loss. The optimal answer isn't simply 'longer' or "
-         "'shorter' — it's timelocks paired with emergency circuit breakers that can bypass "
+         "suffered instant, catastrophic loss. The optimal configuration is not simply 'longer' or "
+         "'shorter' — it is timelocks paired with emergency circuit breakers that can bypass "
          "the delay when oracle deviations exceed thresholds.",
          "NUANCED"),
         ("Liquidity Isolation Mechanisms",
          "Address the liquidity contagion vector: rate-limit withdrawals from shared markets "
          "during stress, or implement per-vault liquidity reserves to prevent one vault's "
-         "panic from draining shared pools. Gauntlet's 6-hour illiquidity event shows this "
-         "is a real, not theoretical, risk.",
+         "withdrawal pressure from draining shared pools. Gauntlet's 6-hour illiquidity event "
+         "demonstrates this is a practical, not theoretical, risk.",
          "HIGH"),
         ("Contagion Disclosure",
-         "Surface cross-market exposure data in the vault UI so depositors can see which "
-         "other vaults share their underlying markets. Currently invisible to most users.",
+         "Surface cross-market exposure data in the vault UI so depositors can assess which "
+         "other vaults share their underlying markets. This information is currently not readily "
+         "available to most users.",
          "MEDIUM"),
         ("V1.1 Bad Debt Transparency",
-         "V1.1 vaults mask bad debt by not auto-realizing it in share prices. As shown in the MEV Capital USDC (Arb) "
-         "example, the share price can continue rising while the vault carries unrealized losses — "
-         "only the massive TVL drop reveals the problem. Require explicit disclosure when vaults "
-         "carry unrealized bad debt from toxic markets.",
+         "V1.1 vaults do not auto-realize bad debt in share prices. As demonstrated in the "
+         "MEV Capital USDC (Arb) example, the share price can continue rising while the vault "
+         "carries unrealized losses — only the TVL decline reveals the underlying issue. "
+         "Requiring explicit disclosure when vaults carry unrealized bad debt from affected "
+         "markets would improve depositor visibility.",
          "HIGH"),
     ]
 

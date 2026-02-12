@@ -10,23 +10,32 @@ from utils.charts import apply_layout, RESPONSE_COLORS, RED, GREEN, BLUE, YELLOW
 
 def render():
     st.title("Curator Response Analysis")
-    st.caption(
-        "15 vaults exited proactively (weeks before depeg), 3 reacted early, "
-        "1 was slow, and 7 never properly exited — response speed was the #1 predictor of outcome."
-    )
 
     vaults = load_vaults()
     if vaults.empty:
         st.error("⚠️ Vault data not available — run the pipeline to generate `block1_vaults_graphql.csv`.")
         return
 
-    # ── Key Metrics ─────────────────────────────────────────
+    # ── Dynamic caption from data ────────────────────────────
     response_counts = vaults["response_class"].value_counts()
+    n_proactive = response_counts.get("PROACTIVE", 0)
+    n_early = response_counts.get("EARLY_REACTOR", 0)
+    n_slow = response_counts.get("SLOW_REACTOR", 0)
+    n_late = response_counts.get("VERY_LATE", 0)
+    n_total = len(vaults)
+
+    st.caption(
+        f"{n_total} vaults analyzed: {n_proactive} exited proactively, {n_early} reacted early, "
+        f"{n_slow} responded slowly, and {n_late} maintained exposure through the analysis period "
+        f"— response speed was the primary predictor of outcome."
+    )
+
+    # ── Key Metrics ─────────────────────────────────────────
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Proactive", response_counts.get("PROACTIVE", 0), help="Exited >7 days before depeg")
-    c2.metric("Early Reactor", response_counts.get("EARLY_REACTOR", 0), help="Exited 0-7 days before depeg")
-    c3.metric("Slow Reactor", response_counts.get("SLOW_REACTOR", 0), help="Exited within 7 days after depeg")
-    c4.metric("Very Late / No Exit", response_counts.get("VERY_LATE", 0), help="Still exposed weeks/months later")
+    c1.metric("Proactive", n_proactive, help="Exited >7 days before depeg")
+    c2.metric("Early Reactor", n_early, help="Exited 0–7 days before depeg")
+    c3.metric("Slow Reactor", n_slow, help="Exited within 7 days after depeg")
+    c4.metric("Very Late / No Exit", n_late, help="Still exposed weeks/months later")
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
@@ -108,7 +117,7 @@ def render():
     # ── Timelock Analysis ───────────────────────────────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
     st.subheader("Timelock Distribution")
-    st.caption("Vaults with 0-day timelocks could change allocations instantly — a governance risk.")
+    st.caption("Vaults with 0-day timelocks could change allocations instantly — a configuration worth monitoring.")
 
     col1, col2 = st.columns(2)
 
@@ -135,9 +144,32 @@ def render():
         fig.update_traces(textposition="outside")
         st.plotly_chart(fig, use_container_width=True)
 
-    # ── Key Insight ─────────────────────────────────────────
-    st.info(
-        "**Key finding:** Response speed, not vault size, determined outcomes. "
-        "Gauntlet's \\$192M frontier vault exited 63 days before depeg with zero loss, "
-        "while Relend (\\$63K TVL) suffered 98.4% drawdown because it couldn't exit its position in time."
-    )
+    # ── Key Insight (computed from data) ─────────────────────
+    # Find the best and worst outcomes dynamically
+    proactive_vaults = vaults[vaults["response_class"] == "PROACTIVE"].sort_values("tvl_usd", ascending=False)
+    late_vaults = vaults[vaults["response_class"] == "VERY_LATE"].sort_values("share_price_drawdown", ascending=True)
+
+    if not proactive_vaults.empty and not late_vaults.empty:
+        best = proactive_vaults.iloc[0]
+        worst = late_vaults.iloc[0]
+
+        best_tvl = format_usd(best.get("tvl_pre_depeg_usd", best.get("tvl_usd", 0)))
+        best_name = best["curator"]
+        best_days = abs(int(best["days_before_depeg"]))
+
+        worst_name = worst["vault_name"]
+        worst_tvl = format_usd(worst.get("tvl_usd", 0))
+        worst_dd = abs(worst.get("share_price_drawdown", 0))
+
+        finding_text = (
+            f"**Key finding:** Response speed, not vault size, determined outcomes. "
+            f"{best_name}'s {best_tvl} vault exited {best_days} days before the depeg with zero loss, "
+            f"while {worst_name} ({worst_tvl} TVL) suffered {worst_dd:.1%} drawdown due to "
+            f"inability to exit its position in time."
+        ).replace("$", "\\$")
+    else:
+        finding_text = (
+            "**Key finding:** Response speed, not vault size, was the primary determinant of outcome."
+        )
+
+    st.info(finding_text)

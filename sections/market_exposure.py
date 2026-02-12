@@ -1,4 +1,4 @@
-"""Section 2: Market Exposure — 18 toxic markets across 3 chains."""
+"""Section 2: Market Exposure — Toxic markets across multiple chains."""
 
 import streamlit as st
 import plotly.express as px
@@ -9,7 +9,6 @@ from utils.charts import apply_layout, donut_chart, RED, GREEN, YELLOW, ORANGE, 
 
 def render():
     st.title("Market Exposure")
-    st.caption("18 markets using xUSD, deUSD, or sdeUSD as collateral — discovered across 3,133 total Morpho markets.")
 
     markets = load_markets()
     vaults = load_vaults()
@@ -17,6 +16,15 @@ def render():
     if markets.empty:
         st.error("⚠️ Market data not available — run the pipeline to generate `block1_markets_graphql.csv`.")
         return
+
+    # Dynamic caption from data
+    n_markets = len(markets)
+    n_chains = markets["chain"].nunique() if "chain" in markets.columns else 0
+    collateral_types = ", ".join(sorted(markets["collateral"].dropna().unique())) if "collateral" in markets.columns else "xUSD, deUSD, sdeUSD"
+    st.caption(
+        f"{n_markets} markets using {collateral_types} as collateral, "
+        f"identified across {n_chains} chains via the Morpho Blue GraphQL API."
+    )
 
     # ── Key Metrics ─────────────────────────────────────────
     at_risk = markets[markets["status"].str.contains("AT_RISK")]
@@ -37,19 +45,20 @@ def render():
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
-    # ── Elixir Private Market Warning ────────────────────────
-    st.warning(
-        "**Hidden exposure: Elixir's \\$68M private Morpho market.** "
-        "In addition to the 18 public markets shown below, Elixir lent **\\$68M USDC** "
-        "(65% of deUSD's total backing) to Stream Finance through **private, non-whitelisted "
-        "Morpho markets** where Stream was the sole borrower, using xUSD as collateral. "
-        "These private markets are not captured by the public Morpho API and represent "
-        "the largest single Morpho exposure to this crisis. "
-        "*(Source: BlockEden analysis, lawsuit details, YAM exposure map)*"
+    # ── Elixir Private Market Context ──────────────────────────
+    st.info(
+        "**Additional context: private market exposure.** "
+        f"In addition to the {n_markets} public markets shown below, Elixir Network lent "
+        "approximately **\\$68M USDC** (65% of deUSD's total backing) to Stream Finance through "
+        "**private, non-whitelisted Morpho markets** where Stream was the sole borrower, using "
+        "xUSD as collateral. These private markets are not captured by the public API and "
+        "represent the largest single Morpho-related exposure to this event. "
+        "*(Source: BlockEden analysis; Stream Trading Corp. v. McMeans, "
+        "Case No. 3:25-cv-10524; YAM exposure map)*"
     )
 
     # ── Market Table ────────────────────────────────────────
-    st.subheader(f"All {len(markets)} Toxic Markets")
+    st.subheader(f"All {len(markets)} Affected Markets")
 
     display_cols = ["market_label", "chain", "collateral", "loan", "lltv", "supply_usd",
                     "borrow_usd", "utilization", "bad_debt_usd", "status"]

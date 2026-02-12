@@ -28,17 +28,28 @@ def render():
         f"{len(markets)} markets and {len(vaults)} vaults on {n_chains} chains.".replace("$", "\\$")
     )
 
+    # Compute liquidation event count from data if available
+    from utils.data_loader import load_csv
+    liq_events = load_csv("block5_liquidation_events.csv")
+    if not liq_events.empty and "event_count" in liq_events.columns:
+        n_liquidations = int(liq_events["event_count"].sum())
+    elif not liq_events.empty:
+        n_liquidations = len(liq_events)
+    else:
+        n_liquidations = 0
+
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Toxic Markets", f"{len(markets)}" if not markets.empty else "—", help="Markets using xUSD, deUSD, or sdeUSD as collateral")
     c2.metric("Affected Vaults", f"{len(vaults)}" if not vaults.empty else "—", help="Unique vaults with current or historical exposure")
     c3.metric("Total Bad Debt", format_usd(total_bad_debt), delta=f"-{format_usd(total_bad_debt)}", delta_color="inverse")
     c4.metric("Chains Affected", str(n_chains), help=chains_list)
-    c5.metric("Liquidation Events", "0", help="Oracle masking prevented liquidations — see Liquidation Failure page")
+    c5.metric("Liquidation Events", str(n_liquidations),
+              help="Oracle masking prevented liquidations — see Liquidation Failure page")
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
     # ── Asset Price Collapse ────────────────────────────────
-    st.subheader("Token Price Collapse")
+    st.subheader("Token Price History")
 
     prices = load_asset_prices()
     if prices.empty:
@@ -64,7 +75,6 @@ def render():
                 hovertemplate="%{x}<br>%{y:$.4f}<extra>" + asset + "</extra>",
             ))
 
-        import pandas as pd
         fig.add_vline(x=pd.Timestamp("2025-11-04"), line_dash="dash", line_color=RED, opacity=0.5)
         fig.add_annotation(x=pd.Timestamp("2025-11-04"), y=1, yref="paper", text="Depeg Start",
                            showarrow=False, font=dict(size=10, color=RED), yshift=10)
@@ -183,9 +193,9 @@ def render():
         _q1_text = (
             f"**{format_usd(_total_bd)} in protocol-level bad debt** across {_n_mkts} markets "
             f"on {_n_chains} chains, with the largest concentration ({format_usd(_largest_bd)}) in "
-            f"{_largest_mkt}. The critical finding: **zero liquidation events** occurred despite "
-            f"collateral values collapsing — hardcoded Chainlink oracles continued reporting ≈\\$1.00, "
-            f"completely masking the true risk.\n\n"
+            f"{_largest_mkt}. The critical finding: **{n_liquidations} liquidation events** occurred despite "
+            f"collateral values declining 95–99% — hardcoded Chainlink oracles continued reporting "
+            f"approximately \\$1.00, masking the true risk from the liquidation engine.\n\n"
         )
         if not _damaged.empty:
             _dam_details = []
@@ -202,10 +212,12 @@ def render():
         # Compute Q2 values from data
         _n_instant_tl = len(vaults[vaults["timelock_days"] == 0]) if not vaults.empty and "timelock_days" in vaults.columns else 0
         st.markdown(f"""
-        Four structural vulnerabilities: **(1) Oracle architecture** — Chainlink adapters lacked circuit-breakers
-        or deviation thresholds, allowing stale \\$1.00 prices during collateral collapses. **(2) Timelock gaps** — {_n_instant_tl} of {_n_vaults}
-        vaults had instant (0-day) timelocks, enabling unchecked exposure changes. **(3) No automated exit
-        triggers** — curator-dependent response meant speed varied significantly.
-        **(4) Contagion paths** — some vaults bridged toxic and clean markets,
-        meaning depositors in "safe" markets unknowingly shared toxic exposure.
+        Four structural areas identified: **(1) Oracle architecture** — Chainlink adapters lacked circuit-breakers
+        or deviation thresholds, allowing stale \\$1.00 prices during collateral value declines of 95%+.
+        **(2) Timelock configuration** — {_n_instant_tl} of {_n_vaults}
+        vaults had instant (0-day) timelocks, enabling unchecked exposure changes, while longer timelocks
+        delayed emergency exits during the crisis. **(3) No automated exit
+        triggers** — curator-dependent response meant speed varied significantly across vaults.
+        **(4) Liquidity contagion paths** — vaults bridging toxic and clean markets meant
+        depositors in unaffected markets could experience reduced liquidity during stress events.
         """)
