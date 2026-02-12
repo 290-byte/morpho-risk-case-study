@@ -130,13 +130,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -- Navigation ---------------------------------------------------
-from sections import background, overview, market_exposure, bad_debt, curator_response
+from sections import background, overview, damage_summary, market_exposure, bad_debt, curator_response
 from sections import liquidity_stress, liquidation_failure, contagion, admin
 
 pages = {
     "Case Study": [
         st.Page(background.render, title="Background", url_path="background"),
         st.Page(overview.render, title="Overview & Timeline", url_path="overview"),
+        st.Page(damage_summary.render, title="Damage Summary", url_path="damage"),
         st.Page(market_exposure.render, title="Market Exposure", url_path="markets"),
         st.Page(bad_debt.render, title="Bad Debt Analysis", url_path="bad-debt"),
     ],

@@ -37,7 +37,7 @@ def render():
 
     with col3:
         with st.container(border=True):
-            st.markdown("**Morpho Blue**")
+            st.markdown("**Morpho**")
             st.markdown(
                 "Permissionless lending protocol where both xUSD and deUSD "
                 "were listed as collateral across 18 public markets and "
