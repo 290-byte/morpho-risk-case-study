@@ -1,37 +1,37 @@
-date,event,category,severity,source,link
-2024-02-01,Stream Finance founded; raises $1.5M seed from Polychain Capital,background,info,Multiple outlets,https://www.theblock.co/post/377400/stream-finance-halts-withdrawals-93-million-loss
-2025-01-01,"Caleb McMeans (""0xlaw"") takes over Stream Finance operations",background,info,Lawsuit complaint,
-2025-06-29,Steakhouse Financial publishes MetaOracle Deviation Timelock proposal on Morpho governance forum,structural,info,Morpho governance forum,https://forum.morpho.org/t/steakhouse-meta-oracle-deviation-timelock/985
-2025-09-29,Morpho V2 (Bundler v2) officially announced,structural,info,Morpho,
-2025-10-02,"Gauntlet USDC Core exits toxic market allocations ($104.3K peak exposure, 33 days before depeg)",curator_action,positive,block3_allocation_timeseries.csv,
-2025-10-02,"Gauntlet Elixir USDC exits toxic markets ($6K peak exposure, 32 days before depeg)",curator_action,positive,block3_allocation_timeseries.csv,
-2025-10-08,Morpho V2 contracts deployed on-chain,structural,info,Morpho,
-2025-10-10,"ETH crashes ~21% ($20B liquidations). Ryan DeMattia liquidated on personal positions; allegedly begins misappropriating ~$93M in Stream funds",trigger,critical,Lawsuit — Case No. 3:25-cv-10524,
-2025-10-27,"Gauntlet USDC Frontier exits toxic markets (8 days before depeg, detected via historical reallocation)",curator_action,positive,block3_allocation_timeseries.csv,
-2025-10-28,"Yearn developer Schlag exposes recursive xUSD-deUSD cross-minting: $1.9M USDC to $14.5M xUSD (7.6x amplification)",warning,critical,Schlag public analysis,
-2025-10-28,"On-chain analyst CBB0FE flags 4.1x leverage: $170M backing vs $530M borrowing",warning,critical,CBB0FE public post,
-2025-10-28,Hyperithm may have begun withdrawal from sdeUSD markets (timing correlates with CBB0FE warning),curator_action,positive,Timing correlation — unconfirmed,
-2025-11-02,"DeMattia admits to McMeans: lost ""nearly all"" of ~$93M",trigger,critical,Lawsuit complaint,
-2025-11-02,McMeans allegedly transfers ~$2.1M from Stream wallets to personal wallets via Railgun privacy mixer,trigger,critical,Lawsuit complaint,
-2025-11-03,"Balancer V2 exploited for ~$100-128M across 6+ chains. Concurrent with xUSD collapse, not causal",concurrent,warning,PeckShield; multiple outlets,
-2025-11-03,Users report xUSD withdrawal delays; Chaos Labs' Omer Goldberg warns of depeg,depeg,warning,Public posts,
-2025-11-03,PeckShield first alert at ~9:34 PM UTC: xUSD down ~23%,depeg,critical,PeckShield,
-2025-11-03,"Stream Finance announces $93M loss, freezes withdrawals, engages Perkins Coie",depeg,critical,Stream Finance; TheBlock,https://www.theblock.co/post/377400/stream-finance-halts-withdrawals-93-million-loss
-2025-11-04,"xUSD crashes to $0.24-$0.30. Oracle still reports ~$1.00-$1.26, preventing all liquidations",depeg,critical,CoinGecko; multiple analysts,
-2025-11-04,YAM publishes $285M total exposure map across all DeFi protocols,analysis,warning,Yields and More (YAM),
-2025-11-04,"Stani Kulechov (Aave): ""the next Terra Luna might be brewing""",analysis,warning,Kulechov public post,
-2025-11-04,Gauntlet vaults hit ~6 hours sub-1% withdrawable liquidity despite zero toxic exposure,contagion,warning,Gauntlet Nov 18 report,
-2025-11-05,Gauntlet proposes emergency pause of Compound USDC/USDS/USDT — sdeUSD oracle at $1.06 vs $0.86 market,contagion,warning,Gauntlet report,
-2025-11-05,MEV Capital acknowledges exposure; Re7 Labs issues first statement,curator_action,info,Public posts,
-2025-11-06,"Curators zero supply caps within 8h: MEV Capital Arb (13:40), MEV Capital Eth (16:01), Relend (22:04)",curator_action,warning,block3_admin_events.csv,
-2025-11-06,Elixir announces deUSD sunset; processes 1:1 USDC redemptions for 80% of non-Stream holders,depeg,critical,Elixir; TheBlock,https://www.theblock.co/post/377961/elixir-sunsets-deusd-synthetic-stablecoin-following-stream-finance-unwinding-aims-full-redemptions
-2025-11-06,Lista DAO initiates emergency liquidation vote against MEV Capital and Re7 Labs vaults (800% borrow rates),contagion,warning,Lista DAO governance,
-2025-11-06,"deUSD collapses to $0.015-0.03 (98%+ decline)",depeg,critical,CoinGecko,
-2025-11-07,"Entropy Advisors blacklists MEV Capital + Hyperithm Arbitrum vaults from DRIP rewards",response,warning,Arbitrum Foundation forum,
-2025-11-07,Elixir claims portal launches at elixir.xyz/deusd/claims/,response,info,Elixir,https://elixir.xyz/deusd/claims/
-2025-11-08,"xUSD at $0.07-0.14 (~$30K daily volume). ~$1B exits DeFi yield platforms",aftermath,critical,CoinGecko; multiple outlets,
-2025-11-12,MEV Capital confirms Ethereum vault realized ~3.6% bad debt from sdeUSD exposure,impact,critical,MEV Capital X/Twitter,
-2025-11-14,Relend USDC share price hits $0.017 — 98.4% drawdown. No public statement from curator,impact,critical,CoinGecko; Coinbase; Etherscan,
-2025-11-18,Gauntlet publishes comprehensive market report: zero exposure confirmed with contagion analysis,analysis,positive,Gauntlet,
-2025-11-28,Elixir claims contracts 2 and 3 go live for remaining deUSD/sdeUSD holders,response,positive,Elixir,
-2025-12-08,"Lawsuit filed: Stream Trading Corp. v. McMeans — Case No. 3:25-cv-10524, N.D. California",legal,info,Court records,
+"date","event","category","severity","source","link"
+"2024-02-01","Stream Finance founded; raises $1.5M seed from Polychain Capital","background","info","Multiple outlets","https://www.theblock.co/post/377400/stream-finance-halts-withdrawals-93-million-loss"
+"2025-01-01","Caleb McMeans (""0xlaw"") takes over Stream Finance operations","background","info","Lawsuit complaint",""
+"2025-06-29","Steakhouse Financial publishes MetaOracle Deviation Timelock proposal on Morpho governance forum","structural","info","Morpho governance forum","https://forum.morpho.org/t/steakhouse-meta-oracle-deviation-timelock/985"
+"2025-09-29","Morpho V2 (Bundler v2) officially announced","structural","info","Morpho",""
+"2025-10-02","Gauntlet USDC Core exits toxic market allocations ($104.3K peak exposure, 33 days before depeg)","curator_action","positive","block3_allocation_timeseries.csv",""
+"2025-10-02","Gauntlet Elixir USDC exits toxic markets ($6K peak exposure, 32 days before depeg)","curator_action","positive","block3_allocation_timeseries.csv",""
+"2025-10-08","Morpho V2 contracts deployed on-chain","structural","info","Morpho",""
+"2025-10-10","ETH crashes ~21% ($20B liquidations). Ryan DeMattia liquidated on personal positions; allegedly begins misappropriating ~$93M in Stream funds","trigger","critical","Lawsuit — Case No. 3:25-cv-10524",""
+"2025-10-27","Gauntlet USDC Frontier exits toxic markets (8 days before depeg, detected via historical reallocation)","curator_action","positive","block3_allocation_timeseries.csv",""
+"2025-10-28","Yearn developer Schlag exposes recursive xUSD-deUSD cross-minting: $1.9M USDC to $14.5M xUSD (7.6x amplification)","warning","critical","Schlag public analysis",""
+"2025-10-28","On-chain analyst CBB0FE flags 4.1x leverage: $170M backing vs $530M borrowing","warning","critical","CBB0FE public post",""
+"2025-10-28","Hyperithm may have begun withdrawal from sdeUSD markets (timing correlates with CBB0FE warning)","curator_action","positive","Timing correlation — unconfirmed",""
+"2025-11-02","DeMattia admits to McMeans: lost ""nearly all"" of ~$93M","trigger","critical","Lawsuit complaint",""
+"2025-11-02","McMeans allegedly transfers ~$2.1M from Stream wallets to personal wallets via Railgun privacy mixer","trigger","critical","Lawsuit complaint",""
+"2025-11-03","Balancer V2 exploited for ~$100-128M across 6+ chains. Concurrent with xUSD collapse, not causal","concurrent","warning","PeckShield; multiple outlets",""
+"2025-11-03","Users report xUSD withdrawal delays; Chaos Labs' Omer Goldberg warns of depeg","depeg","warning","Public posts",""
+"2025-11-03","PeckShield first alert at ~9:34 PM UTC: xUSD down ~23%","depeg","critical","PeckShield",""
+"2025-11-03","Stream Finance announces $93M loss, freezes withdrawals, engages Perkins Coie","depeg","critical","Stream Finance; TheBlock","https://www.theblock.co/post/377400/stream-finance-halts-withdrawals-93-million-loss"
+"2025-11-04","xUSD crashes to $0.24-$0.30. Oracle still reports ~$1.00-$1.26, preventing all liquidations","depeg","critical","CoinGecko; multiple analysts",""
+"2025-11-04","YAM publishes $285M total exposure map across all DeFi protocols","analysis","warning","Yields and More (YAM)",""
+"2025-11-04","Stani Kulechov (Aave): ""the next Terra Luna might be brewing""","analysis","warning","Kulechov public post",""
+"2025-11-04","Gauntlet vaults hit ~6 hours sub-1% withdrawable liquidity despite zero toxic exposure","contagion","warning","Gauntlet Nov 18 report",""
+"2025-11-05","Gauntlet proposes emergency pause of Compound USDC/USDS/USDT — sdeUSD oracle at $1.06 vs $0.86 market","contagion","warning","Gauntlet report",""
+"2025-11-05","MEV Capital acknowledges exposure; Re7 Labs issues first statement","curator_action","info","Public posts",""
+"2025-11-06","Curators zero supply caps within 8h: MEV Capital Arb (13:40), MEV Capital Eth (16:01), Relend (22:04)","curator_action","warning","block3_admin_events.csv",""
+"2025-11-06","Elixir announces deUSD sunset; processes 1:1 USDC redemptions for 80% of non-Stream holders","depeg","critical","Elixir; TheBlock","https://www.theblock.co/post/377961/elixir-sunsets-deusd-synthetic-stablecoin-following-stream-finance-unwinding-aims-full-redemptions"
+"2025-11-06","Lista DAO initiates emergency liquidation vote against MEV Capital and Re7 Labs vaults (800% borrow rates)","contagion","warning","Lista DAO governance",""
+"2025-11-06","deUSD collapses to $0.015-0.03 (98%+ decline)","depeg","critical","CoinGecko",""
+"2025-11-07","Entropy Advisors blacklists MEV Capital + Hyperithm Arbitrum vaults from DRIP rewards","response","warning","Arbitrum Foundation forum",""
+"2025-11-07","Elixir claims portal launches at elixir.xyz/deusd/claims/","response","info","Elixir","https://elixir.xyz/deusd/claims/"
+"2025-11-08","xUSD at $0.07-0.14 (~$30K daily volume). ~$1B exits DeFi yield platforms","aftermath","critical","CoinGecko; multiple outlets",""
+"2025-11-12","MEV Capital confirms Ethereum vault realized ~3.6% bad debt from sdeUSD exposure","impact","critical","MEV Capital X/Twitter",""
+"2025-11-14","Relend USDC share price hits $0.017 — 98.4% drawdown. No public statement from curator","impact","critical","CoinGecko; Coinbase; Etherscan",""
+"2025-11-18","Gauntlet publishes comprehensive market report: zero exposure confirmed with contagion analysis","analysis","positive","Gauntlet",""
+"2025-11-28","Elixir claims contracts 2 and 3 go live for remaining deUSD/sdeUSD holders","response","positive","Elixir",""
+"2025-12-08","Lawsuit filed: Stream Trading Corp. v. McMeans — Case No. 3:25-cv-10524, N.D. California","legal","info","Court records",""

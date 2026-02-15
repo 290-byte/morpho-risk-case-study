@@ -116,6 +116,62 @@ def safe_int(val, default=0) -> int:
         return default
 
 
+def forward_fill_daily_prices(daily_rows: List[Dict], depeg_ts: int = TS_NOV_04) -> List[Dict]:
+    """
+    Forward-fill gaps in daily price data for the pre-depeg period.
+
+    If an asset has sparse pre-depeg data (e.g. xUSD has 1 point on Sept 30
+    then nothing until Nov 4), this fills forward at the last known price
+    day-by-day until the depeg date.
+
+    Prevents charts from drawing misleading diagonal lines across data gaps.
+    Only fills the pre-depeg period — post-depeg data is kept as-is.
+    """
+    if not daily_rows:
+        return daily_rows
+
+    # Sort by timestamp
+    sorted_rows = sorted(daily_rows, key=lambda r: r["timestamp"])
+
+    # Split at depeg boundary
+    pre_depeg = [r for r in sorted_rows if r["timestamp"] < depeg_ts]
+    post_depeg = [r for r in sorted_rows if r["timestamp"] >= depeg_ts]
+
+    if not pre_depeg or not post_depeg:
+        return daily_rows  # nothing to fill
+
+    # Check if there's a significant gap (>2 days) between last pre-depeg point and depeg
+    last_pre = pre_depeg[-1]
+    gap_days = (depeg_ts - last_pre["timestamp"]) / 86400
+
+    if gap_days <= 2:
+        return daily_rows  # no significant gap
+
+    # Forward-fill: create daily points from last known price to day before depeg
+    filled = list(pre_depeg)
+    current_ts = last_pre["timestamp"] + 86400
+
+    while current_ts < depeg_ts:
+        filled.append({
+            "symbol": last_pre["symbol"],
+            "address": last_pre["address"],
+            "chain_id": last_pre["chain_id"],
+            "timestamp": current_ts,
+            "date": ts_to_date(current_ts),
+            "datetime": ts_to_datetime(current_ts),
+            "price_usd": last_pre["price_usd"],
+            "current_price_usd": last_pre.get("current_price_usd", 0),
+        })
+        current_ts += 86400
+
+    n_filled = len(filled) - len(pre_depeg)
+    if n_filled > 0:
+        print(f"      ℹ️  Forward-filled {n_filled} daily pre-depeg prices "
+              f"at ${last_pre['price_usd']:.4f} ({last_pre['date']} → {ts_to_date(depeg_ts - 86400)})")
+
+    return filled + post_depeg
+
+
 # ═══════════════════════════════════════════════════════════════
 #  TASK 1: Oracle Configuration Analysis
 # ═══════════════════════════════════════════════════════════════
@@ -947,6 +1003,8 @@ def main():
                 addr, chain_id, symbol, TS_SEPT_01, TS_JAN_31, "DAY"
             )
             if daily:
+                # Forward-fill pre-depeg gaps (e.g. xUSD has 1 point in Sept, then nothing until Nov 4)
+                daily = forward_fill_daily_prices(daily, depeg_ts=TS_NOV_04)
                 print(f"      ✅ {len(daily)} daily pts")
             else:
                 print(f"      ⚠️  No daily data")

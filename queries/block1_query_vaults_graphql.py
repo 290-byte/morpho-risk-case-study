@@ -334,11 +334,13 @@ def phase1_vaults_by_market_keys(toxic_keys: Dict[str, Dict]) -> Dict[Tuple[str,
 #  PHASE 2: Historical discovery via vaultReallocates
 # ══════════════════════════════════════════════════════════════════════
 
-def phase2_reallocate_discovery(toxic_keys: Dict[str, Dict]) -> Set[Tuple[str, int]]:
+def phase2_reallocate_discovery(toxic_keys: Dict[str, Dict]) -> Tuple[Set[Tuple[str, int]], Dict[Tuple[str, int], Set[str]]]:
     """
     Query vaultReallocates(where: { marketUniqueKey_in: [...] }) to find
     ALL vault addresses that EVER interacted with toxic markets.
-    Returns set of (address_lower, chain_id) tuples.
+    Returns:
+      - set of (address_lower, chain_id) tuples
+      - dict mapping (address_lower, chain_id) → set of market uniqueKeys
     """
     print(f"\n{'─' * 60}")
     print(f"🔍 PHASE 2: Historical vault discovery via reallocations")
@@ -353,6 +355,7 @@ def phase2_reallocate_discovery(toxic_keys: Dict[str, Dict]) -> Set[Tuple[str, i
         keys_by_chain[cid].append(key)
 
     discovered_addrs: Set[Tuple[str, int]] = set()
+    addr_to_markets: Dict[Tuple[str, int], Set[str]] = {}
 
     for chain_id, market_keys in keys_by_chain.items():
         chain_name = CHAIN_NAMES.get(chain_id, str(chain_id))
@@ -409,8 +412,14 @@ def phase2_reallocate_discovery(toxic_keys: Dict[str, Dict]) -> Set[Tuple[str, i
 
                 for r in items:
                     vault_addr = (r.get("vault") or {}).get("address", "").lower()
+                    market_key = (r.get("market") or {}).get("uniqueKey", "")
                     if vault_addr:
-                        discovered_addrs.add((vault_addr, chain_id))
+                        addr_key = (vault_addr, chain_id)
+                        discovered_addrs.add(addr_key)
+                        if addr_key not in addr_to_markets:
+                            addr_to_markets[addr_key] = set()
+                        if market_key:
+                            addr_to_markets[addr_key].add(market_key)
 
                 total_events += len(items)
 
@@ -426,7 +435,7 @@ def phase2_reallocate_discovery(toxic_keys: Dict[str, Dict]) -> Set[Tuple[str, i
                 break
 
     print(f"\n   Phase 2 total: {len(discovered_addrs)} unique vault addresses from reallocations")
-    return discovered_addrs
+    return discovered_addrs, addr_to_markets
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -492,13 +501,18 @@ def filter_vaults_with_toxic_exposure(
     vaults: Dict[Tuple[str, int], Dict],
     toxic_keys: Dict[str, Dict],
     historical_addrs: Set[Tuple[str, int]],
+    addr_to_markets: Dict[Tuple[str, int], Set[str]] = None,
 ) -> List[Dict]:
     """
     Build vault-market pairs from vault data.
 
     For vaults with CURRENT toxic allocations: extract normally.
-    For vaults found ONLY via reallocations (no current allocation): create synthetic entry.
+    For vaults found ONLY via reallocations (no current allocation): create synthetic entry
+    using the actual market key(s) from the reallocation events.
     """
+    if addr_to_markets is None:
+        addr_to_markets = {}
+
     toxic_key_set = set(toxic_keys.keys())
     vault_market_pairs = []
     found_by_allocation: Set[Tuple[str, int]] = set()
@@ -542,52 +556,97 @@ def filter_vaults_with_toxic_exposure(
         if not vault:
             continue
 
-        # Find which toxic market(s) this vault was likely exposed to
-        matching_toxic = [
-            (key, info) for key, info in toxic_keys.items()
-            if info["chain_id"] == chain_id
-        ]
+        # Use actual market keys from reallocation events (Phase 2 data)
+        known_markets = addr_to_markets.get((addr, chain_id), set())
 
-        if not matching_toxic:
-            continue
+        if known_markets:
+            # Create one entry per known market (vault may have interacted with multiple)
+            for market_key in known_markets:
+                if market_key not in toxic_keys:
+                    continue
+                toxic_info = toxic_keys[market_key]
 
-        # Use the first matching toxic market (by chain)
-        toxic_key, toxic_info = matching_toxic[0]
+                synthetic_alloc = {
+                    "supplyAssets": "0",
+                    "supplyAssetsUsd": 0,
+                    "supplyShares": "0",
+                    "supplyCap": "0",
+                    "supplyCapUsd": 0,
+                    "supplyQueueIndex": None,
+                    "withdrawQueueIndex": None,
+                    "enabled": False,
+                    "removableAt": None,
+                    "pendingSupplyCap": None,
+                    "pendingSupplyCapValidAt": None,
+                    "pendingSupplyCapUsd": None,
+                    "market": {
+                        "uniqueKey": market_key,
+                        "collateralAsset": {
+                            "symbol": toxic_info["collateral_symbol"],
+                            "address": None,
+                        },
+                        "loanAsset": {
+                            "symbol": toxic_info["loan_symbol"],
+                            "address": None,
+                        },
+                        "lltv": None,
+                    },
+                }
 
-        # Create synthetic allocation with zeros
-        synthetic_alloc = {
-            "supplyAssets": "0",
-            "supplyAssetsUsd": 0,
-            "supplyShares": "0",
-            "supplyCap": "0",
-            "supplyCapUsd": 0,
-            "supplyQueueIndex": None,
-            "withdrawQueueIndex": None,
-            "enabled": False,
-            "removableAt": None,
-            "pendingSupplyCap": None,
-            "pendingSupplyCapValidAt": None,
-            "pendingSupplyCapUsd": None,
-            "market": {
-                "uniqueKey": toxic_key,
-                "collateralAsset": {
-                    "symbol": toxic_info["collateral_symbol"],
-                    "address": None,
+                vault_market_pairs.append({
+                    "vault": vault,
+                    "allocation": synthetic_alloc,
+                    "market": synthetic_alloc["market"],
+                    "discovery_method": "historical_reallocation",
+                })
+        else:
+            # Fallback: no known markets from Phase 2, assign all same-chain toxic markets
+            matching_toxic = [
+                (key, info) for key, info in toxic_keys.items()
+                if info["chain_id"] == chain_id
+            ]
+
+            if not matching_toxic:
+                continue
+
+            # Use first match as fallback (less accurate)
+            toxic_key, toxic_info = matching_toxic[0]
+            print(f"   ⚠️  {vault.get('name', addr[:10])}: no market key from reallocations, "
+                  f"using fallback ({toxic_info['collateral_symbol']}/{toxic_info['loan_symbol']})")
+
+            synthetic_alloc = {
+                "supplyAssets": "0",
+                "supplyAssetsUsd": 0,
+                "supplyShares": "0",
+                "supplyCap": "0",
+                "supplyCapUsd": 0,
+                "supplyQueueIndex": None,
+                "withdrawQueueIndex": None,
+                "enabled": False,
+                "removableAt": None,
+                "pendingSupplyCap": None,
+                "pendingSupplyCapValidAt": None,
+                "pendingSupplyCapUsd": None,
+                "market": {
+                    "uniqueKey": toxic_key,
+                    "collateralAsset": {
+                        "symbol": toxic_info["collateral_symbol"],
+                        "address": None,
+                    },
+                    "loanAsset": {
+                        "symbol": toxic_info["loan_symbol"],
+                        "address": None,
+                    },
+                    "lltv": None,
                 },
-                "loanAsset": {
-                    "symbol": toxic_info["loan_symbol"],
-                    "address": None,
-                },
-                "lltv": None,
-            },
-        }
+            }
 
-        vault_market_pairs.append({
-            "vault": vault,
-            "allocation": synthetic_alloc,
-            "market": synthetic_alloc["market"],
-            "discovery_method": "historical_reallocation",
-        })
+            vault_market_pairs.append({
+                "vault": vault,
+                "allocation": synthetic_alloc,
+                "market": synthetic_alloc["market"],
+                "discovery_method": "historical_reallocation",
+            })
 
     return vault_market_pairs
 
@@ -829,7 +888,7 @@ def main():
     phase1_vaults = phase1_vaults_by_market_keys(toxic_keys)
 
     # ── Phase 2: Historical discovery via reallocations ──
-    phase2_addrs = phase2_reallocate_discovery(toxic_keys)
+    phase2_addrs, addr_to_markets = phase2_reallocate_discovery(toxic_keys)
 
     # ── Find addresses in Phase 2 but not Phase 1 ──
     phase1_addrs = set(phase1_vaults.keys())
@@ -857,7 +916,7 @@ def main():
     print(f"{'─' * 60}")
 
     vault_market_pairs = filter_vaults_with_toxic_exposure(
-        all_vaults, toxic_keys, phase2_addrs
+        all_vaults, toxic_keys, phase2_addrs, addr_to_markets
     )
 
     if not vault_market_pairs:
@@ -870,6 +929,14 @@ def main():
     print(f"\n📊 Parsing vault allocation data...")
     parsed_data = [parse_vault_market_data(vm) for vm in vault_market_pairs]
     df = pd.DataFrame(parsed_data)
+
+    # Deduplicate: same (vault_address, market_id) should appear only once
+    # Keep current_allocation over historical_reallocation if both exist
+    pre_dedup = len(df)
+    df = df.sort_values("discovery_method", ascending=True)  # current_allocation < historical_reallocation
+    df = df.drop_duplicates(subset=["vault_address", "market_id"], keep="first")
+    if len(df) < pre_dedup:
+        print(f"   ℹ️  Deduplicated: {pre_dedup} → {len(df)} rows (removed {pre_dedup - len(df)} exact duplicates)")
 
     # Sort by supply assets USD descending, then by vault_total_assets_usd
     df = df.sort_values(['supply_assets_usd', 'vault_total_assets_usd'], ascending=[False, False])

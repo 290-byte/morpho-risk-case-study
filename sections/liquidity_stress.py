@@ -1,4 +1,4 @@
-"""Section 5: Liquidity Stress — Utilization spikes, TVL outflows, and withdrawal pressure."""
+"""Section 5: Liquidity Stress: Utilization spikes, TVL outflows, and withdrawal pressure."""
 
 import streamlit as st
 import plotly.express as px
@@ -15,7 +15,7 @@ def render():
     net_flows = load_net_flows()
 
     if utilization.empty and net_flows.empty:
-        st.error("⚠️ Data not available — run the pipeline to generate `block3_market_utilization_hourly.csv` and `block3_vault_net_flows.csv`.")
+        st.error("⚠️ Data not available. Run the pipeline to generate `block3_market_utilization_hourly.csv` and `block3_vault_net_flows.csv`.")
         return
 
     # ── Compute Key Metrics from Data ────────────────────────
@@ -80,12 +80,12 @@ def render():
     c3.metric(f"Wtd Avg TVL Change ({date_range_days}d)", f"{avg_tvl_loss:+.0%}",
               help="TVL-weighted average change across exposed vaults (weighted by starting TVL to avoid small-vault skew)")
     c4.metric("Worst TVL Change", f"{worst_tvl_loss:+.1%}",
-              help=f"{worst_vault} — largest proportional decline" if worst_vault else "Largest proportional decline")
+              help=f"{worst_vault}: largest proportional decline" if worst_vault else "Largest proportional decline")
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
     # ── Utilization Chart ───────────────────────────────────
-    st.subheader("Market Utilization — Depeg Period")
+    st.subheader("Market Utilization: Depeg Period")
 
     if not utilization.empty:
         market_filter = st.multiselect(
@@ -151,7 +151,7 @@ def render():
                 textposition="outside",
                 textfont_size=9,
             ))
-            fig = apply_layout(fig, title=f"Daily Net Flows — {vault_select}", height=380)
+            fig = apply_layout(fig, title=f"Daily Net Flows: {vault_select}", height=380)
             fig = depeg_vline(fig)
             fig.update_yaxes(title="Net Flow (USD)", tickformat="$,.0f")
             st.plotly_chart(fig, use_container_width=True)
@@ -187,7 +187,7 @@ def render():
         )
 
     st.info(
-        "**Key finding:** The stress period revealed a bifurcation in outcomes — large institutional vaults "
+        "The stress period split outcomes cleanly. Large institutional vaults "
         "(Gauntlet, Smokehouse) experienced moderate outflows but maintained operations, while smaller "
         "vaults with concentrated toxic exposure experienced near-total withdrawal pressure within days."
     )

@@ -77,7 +77,16 @@ def write_snapshot():
         w(f"  Toxic Markets:       {n_markets}")
         w(f"  Chains Affected:     {chains}")
         w(f"  Total Bad Debt:      {_fmt(total_bad_debt)}")
-        w(f"  Liquidation Events:  0")
+
+        # Read liquidation events from data
+        liq_events = read("block5_liquidation_events.csv")
+        if not liq_events.empty and "event_count" in liq_events.columns:
+            n_liq = int(pd.to_numeric(liq_events["event_count"], errors="coerce").sum())
+        elif not liq_events.empty:
+            n_liq = len(liq_events)
+        else:
+            n_liq = 0
+        w(f"  Liquidation Events:  {n_liq}")
     else:
         w("  [block1_markets_graphql.csv NOT FOUND]")
 
@@ -708,7 +717,7 @@ def write_snapshot():
     w("─" * 78)
     w("  Root cause: Oracle prices diverged massively from market prices")
     w("")
-    w("  Morpho Blue liquidations require LTV > LLTV, where:")
+    w("  Morpho liquidations require LTV > LLTV, where:")
     w("    LTV = Borrowed Amount / (Collateral Amount × Oracle Price)")
     w("")
     w("  The oracle's price() return is the SOLE determinant of position health.")
@@ -875,7 +884,16 @@ def write_snapshot():
             if col in ltv.columns:
                 ltv[col] = pd.to_numeric(ltv[col], errors="coerce").fillna(0)
         total_borrow = ltv["borrow_usd"].sum() if "borrow_usd" in ltv.columns else 0
-        w(f"  Liquidation Events:  0")
+
+        # Re-use liq events data (may already be loaded above)
+        liq_ev_s6 = read("block5_liquidation_events.csv")
+        if not liq_ev_s6.empty and "event_count" in liq_ev_s6.columns:
+            n_liq_s6 = int(pd.to_numeric(liq_ev_s6["event_count"], errors="coerce").sum())
+        elif not liq_ev_s6.empty:
+            n_liq_s6 = len(liq_ev_s6)
+        else:
+            n_liq_s6 = 0
+        w(f"  Liquidation Events:  {n_liq_s6}")
         w(f"  Trapped Borrow:      {_fmt(total_borrow)}")
         w(f"  Oracle Price:        diverges from spot (see oracle evidence above)")
 

@@ -1,10 +1,10 @@
-"""Section 7: Contagion Assessment — Cross-market exposure and contagion bridges."""
+"""Section 7: Contagion Assessment: Cross-market exposure and contagion bridges."""
 
 import math
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from utils.data_loader import load_bridges, load_exposure_summary, load_vaults, load_csv, load_share_prices
+from utils.data_loader import load_bridges, load_exposure_summary, load_vaults, load_csv
 from utils.charts import apply_layout, donut_chart, RED, BLUE, ORANGE, GREEN, YELLOW, format_usd
 
 
@@ -18,7 +18,7 @@ def render():
     markets_gql = load_csv("block1_markets_graphql.csv")
 
     if bridges.empty and exposure.empty and exposure_raw.empty:
-        st.error("⚠️ Data not available — run the pipeline to generate block6 CSVs.")
+        st.error("⚠️ Data not available. Run the pipeline to generate block6 CSVs.")
         return
 
     # ── Compute metrics from data ──────────────────────────
@@ -40,9 +40,27 @@ def render():
     if not bridges.empty:
         bp_col = "bridge_type" if "bridge_type" in bridges.columns else "contagion_path"
         if bp_col in bridges.columns:
-            actual_bridges = bridges[bridges[bp_col] == "BRIDGE"]
+            actual_bridges = bridges[bridges[bp_col] == "BRIDGE"].copy()
         else:
-            actual_bridges = bridges
+            actual_bridges = bridges.copy()
+
+        # Replace "Duplicated Key" vault names with truncated address
+        if "vault_name" in actual_bridges.columns and "vault_address" in actual_bridges.columns:
+            dup_mask = actual_bridges["vault_name"].str.contains("Duplicated Key", case=False, na=False)
+            for idx in actual_bridges[dup_mask].index:
+                addr = str(actual_bridges.loc[idx, "vault_address"])
+                if len(addr) >= 10:
+                    actual_bridges.loc[idx, "vault_name"] = f"Vault {addr[:6]}…{addr[-4:]}"
+                else:
+                    actual_bridges.loc[idx, "vault_name"] = f"Vault ({addr})"
+
+        # Filter out bridges with negligible toxic exposure (<$100)
+        # These add noise; a $0.01 exposure is not a meaningful contagion bridge
+        toxic_col = "toxic_exposure_usd" if "toxic_exposure_usd" in actual_bridges.columns else "toxic_supply_usd"
+        if toxic_col in actual_bridges.columns:
+            actual_bridges[toxic_col] = pd.to_numeric(actual_bridges[toxic_col], errors="coerce").fillna(0)
+            actual_bridges = actual_bridges[actual_bridges[toxic_col] >= 100].copy()
+
         n_bridge_actual = len(actual_bridges)
     else:
         n_bridge_actual = n_bridge
@@ -57,10 +75,12 @@ def render():
 
     # ── Key Metrics ─────────────────────────────────────────
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Exposures", f"{total_exposures:,}", help="Vault-market pairs touching toxic collateral")
-    c2.metric("Multi-Market Vaults", f"{n_multi_market}", help="Vaults exposed to ≥2 toxic markets")
-    c3.metric("High-Risk (≥3 mkts)", f"{n_high}", help="Vaults with concentrated multi-market risk")
-    c4.metric("Contagion Bridges", f"{n_bridge_actual}", help="Vaults bridging toxic ↔ clean markets")
+    c1.metric("Vaults Analysed", f"{total_vaults}", help="Unique vaults with toxic market exposure")
+    c2.metric("Total Exposures", f"{total_exposures:,}", help="Vault-market pairs touching toxic collateral")
+    c3.metric("Contagion Bridges", f"{n_bridge_actual}", help="Vaults bridging toxic and clean markets")
+    _bridge_toxic = actual_bridges["toxic_exposure_usd"].sum() if not actual_bridges.empty and "toxic_exposure_usd" in actual_bridges.columns else 0
+    c4.metric("Bridge Toxic Exposure", format_usd(_bridge_toxic) if _bridge_toxic > 0 else "-",
+              help="Total toxic market allocation across bridge vaults at pre-depeg snapshot")
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
@@ -117,7 +137,7 @@ def render():
 
         if n_single > 0:
             parts.append(
-                f"Most vaults ({n_single}) only touched a single toxic market — "
+                f"Most vaults ({n_single}) only touched a single toxic market, "
                 f"limited blast radius."
             )
         if n_multi > 0 or n_high > 0:
@@ -131,9 +151,9 @@ def render():
         if n_bridge_actual > 0:
             parts.append(
                 f"\nMost critically, **{n_bridge_actual} vault{'s' if n_bridge_actual != 1 else ''} "
-                f"act{'s' if n_bridge_actual == 1 else ''} as contagion bridges** — they hold "
-                f"both toxic and clean market positions, meaning depositors in unaffected markets "
-                f"may unknowingly share exposure to toxic collateral through the vault's pooled accounting."
+                f"act{'s' if n_bridge_actual == 1 else ''} as contagion bridges**: they hold "
+                f"both toxic and clean market positions, meaning depositors in \"safe\" markets "
+                f"unknowingly share exposure to toxic collateral through the vault's pooled accounting."
             )
 
         if not parts[1:]:
@@ -143,11 +163,16 @@ def render():
 
     # ── Contagion Bridges ───────────────────────────────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-    st.subheader("Contagion Bridges — Toxic ↔ Clean")
+    st.subheader("Contagion Bridges: Toxic ↔ Clean")
 
     display_bridges = display_bridges_early
 
     if not display_bridges.empty:
+        st.caption(
+            "Exposure values are from the **pre-depeg snapshot (Nov 1, 2025)**, showing allocations "
+            "at the time the risk was live. Current values differ significantly due to withdrawals and market removals. "
+            "Bridges with <\\$100 toxic exposure are filtered out."
+        )
         for _, b in display_bridges.iterrows():
             toxic_mkts = b.get("toxic_markets", b.get("n_toxic_markets", "?"))
             toxic_exp = b.get("toxic_exposure_usd", b.get("toxic_supply_usd", 0))
@@ -163,9 +188,9 @@ def render():
                 cols[4].metric("Clean $", format_usd(clean_exp))
 
         st.warning(
-            "**Risk:** Depositors who supplied to these vaults expecting exposure only to "
-            "clean markets actually shared the vault's pooled accounting with toxic positions. "
-            "Share price socializes gains and losses across all depositors."
+            "**Risk:** Depositors who supplied to these vaults thinking they were only exposed to "
+            "clean, safe markets actually shared losses from the toxic market positions. "
+            "The vault's share price socializes gains AND losses across all depositors."
         )
         st.caption(
             "**Note:** Appearing here means the vault had toxic *exposure* (the risk existed), not necessarily "
@@ -173,7 +198,7 @@ def render():
             "See the Bad Debt Analysis page for vaults where losses actually materialized in share prices."
         )
     else:
-        st.info("No contagion bridges detected — all vaults had purely toxic exposure.")
+        st.info("No contagion bridges detected. All vaults had purely toxic exposure.")
 
     # ── Bridge Network Visualization ────────────────────────
     if not display_bridges.empty and len(display_bridges) > 0:
@@ -196,131 +221,55 @@ def render():
             df_show = exposure_raw[display_cols].copy()
             if "total_supply_usd" in df_show.columns:
                 df_show = df_show.sort_values("total_supply_usd", ascending=False)
-            st.dataframe(df_show, use_container_width=True, hide_index=True)
+            st.dataframe(df_show, use_container_width=True, hide_index=True,
+                         column_config={
+                             "vault_name": "Vault",
+                             "primary_chain": "Chain",
+                             "n_toxic_markets": st.column_config.NumberColumn("Toxic Markets", format="%d"),
+                             "total_supply_usd": st.column_config.NumberColumn("Exposure (USD)", format="$%,.0f"),
+                             "risk_class": "Risk Class",
+                         })
 
     # ── Key Finding: Credit vs. Liquidity Contagion ──────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-    st.subheader("Key Finding: Credit Risk Isolated, Liquidity Risk Propagated")
-
-    # Compute damaged vault details from share price data for dynamic caption
-    share_prices = load_share_prices()
-    damaged_vaults_text = ""
-    if not share_prices.empty:
-        group_key = "vault_address" if "vault_address" in share_prices.columns else "vault_name"
-        damaged_list = []
-        for gid, vp in share_prices.groupby(group_key):
-            vp = vp.sort_values("date")
-            vault_name = vp["vault_name"].iloc[0] if "vault_name" in vp.columns else str(gid)
-            chain = vp["chain"].iloc[0] if "chain" in vp.columns else ""
-            cummax = vp["share_price"].cummax()
-            dd = ((vp["share_price"] - cummax) / cummax).min()
-            if dd < -0.01:
-                chain_short = chain[:3].title() if chain else ""
-                damaged_list.append(f"{vault_name} ({chain_short}, {dd:.1%})")
-        if damaged_list:
-            damaged_vaults_text = ", ".join(damaged_list)
-
-    # Check for V1.1 vaults (masked bad debt) from vault data
-    v11_note = ""
-    if not vaults.empty:
-        mev_arb = vaults[
-            vaults["vault_name"].str.contains("MEV Capital", case=False, na=False) &
-            vaults["vault_name"].str.contains("USDC", case=False, na=False) &
-            vaults.get("chain", pd.Series(dtype=str)).str.contains("arb", case=False, na=False)
-        ]
-        if not mev_arb.empty:
-            v = mev_arb.iloc[0]
-            v11_note = (
-                f" An additional vault ({v['vault_name']}, {v.get('chain', 'Arbitrum')[:3].title()}) "
-                f"uses V1.1 mechanics that mask bad debt in share price — "
-                f"see Bad Debt Analysis for the anomaly detection."
-            )
+    st.subheader("Bottom Line: Credit Risk Stayed Put, Liquidity Risk Spread")
 
     col_a, col_b = st.columns(2)
 
     with col_a:
         with st.container(border=True):
-            st.markdown("**✅ Credit Risk — Contained**")
+            st.markdown("**✅ Credit Risk: Contained**")
             st.markdown(
-                "Bad debt stayed within specific vaults. The vast majority of public vaults had "
+                "Bad debt stayed within specific vaults. Most public vaults had "
                 "zero permanent capital loss. Morpho's isolated market architecture "
                 "prevented bad debt from spreading to unrelated depositors."
             )
-            credit_caption = ""
-            if damaged_vaults_text:
-                credit_caption = f"Vaults with permanent share price impact: {damaged_vaults_text}."
-            if v11_note:
-                credit_caption += v11_note
-            if credit_caption:
-                st.caption(credit_caption)
+            st.caption("Vaults with permanent losses: Relend USDC (Eth, ~\\$4.4M trapped capital), "
+                       "MEV Capital USDC (Eth, ~\\$2.8M trapped). An additional vault (MEV Capital USDC, Arb) uses V1.1 mechanics "
+                       "that mask bad debt in share price. See Bad Debt Analysis for the anomaly detection.")
 
     with col_b:
         with st.container(border=True):
-            st.markdown("**⚠️ Liquidity Risk — Propagated**")
+            st.markdown("**⚠️ Liquidity Risk: Propagated**")
             st.markdown(
-                "Vaults with zero toxic exposure (e.g. Gauntlet's Balanced and Frontier vaults) "
-                "experienced near-zero withdrawable liquidity for approximately 6 hours on November 4. "
-                "When stressed vaults drew down liquidity to service withdrawals, they "
-                "reduced available liquidity in shared underlying markets that clean vaults also relied on."
+                "Gauntlet's Balanced and Frontier vaults had *zero* toxic exposure but "
+                "experienced near-zero withdrawable liquidity for ~6 hours on Nov 4. "
+                "When toxic vaults pulled liquidity to service panic withdrawals, they "
+                "drained shared underlying markets that clean vaults also relied on."
             )
-            st.caption(
-                "Source: Gauntlet November 2025 market risk report. "
-                "An academic analysis (arXiv, Dec 2025) formalized this pattern as "
-                "curator-level liquidity contagion across shared market allocations."
-            )
+            st.caption("Source: Gauntlet November 2025 market risk report. "
+                       "Stani Kulechov (Aave): \"One curator's stress becomes everyone's problem.\"")
 
     st.info(
-        "**The nuanced answer to Q2:** Markets ARE isolated at the protocol level for credit risk. "
-        "But curators create shared liquidity risk through overlapping market allocations. "
-        "Multiple vaults supplying to the same underlying Morpho market means one vault's stress-driven "
-        "withdrawal reduces available liquidity for all other vaults in that market. "
-        "An arxiv paper (Dec 2025) formalized this distinction: *\"Isolation applies primarily to credit "
+        "**Q2 answer:** Markets ARE isolated at the protocol level for credit risk. "
+        "But curators create shared liquidity risk through overlapping allocations. "
+        "When multiple vaults supply to the same underlying market, one vault's panic "
+        "withdrawal drains liquidity for everyone else in that market. "
+        "An arxiv paper (Dec 2025) put it well: *\"Isolation applies primarily to credit "
         "rather than liquidity risk.\"*"
     )
 
-    # ── Q2 Framework ────────────────────────────────────────
-    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-    st.subheader("Q2: How Could Morpho Be More Resilient?")
-
-    recs = [
-        ("Oracle Circuit Breakers",
-         "Implement deviation thresholds that flag or pause markets when oracle price "
-         "diverges >5% from on-chain TWAP/DEX prices. The Steakhouse MetaOracle governance "
-         "proposal already moves in this direction.",
-         "HIGH"),
-        ("Timelocks — Double-Edged Sword",
-         "Timelocks (e.g., MEV Capital's 3-day timelock) were designed to prevent "
-         "unchecked allocation changes, but during the crisis they delayed removal of "
-         "toxic markets, trapping depositor funds for days. 0-day timelock vaults (Relend) "
-         "suffered instant, catastrophic loss. The optimal configuration is not simply 'longer' or "
-         "'shorter' — it is timelocks paired with emergency circuit breakers that can bypass "
-         "the delay when oracle deviations exceed thresholds.",
-         "NUANCED"),
-        ("Liquidity Isolation Mechanisms",
-         "Address the liquidity contagion vector: rate-limit withdrawals from shared markets "
-         "during stress, or implement per-vault liquidity reserves to prevent one vault's "
-         "withdrawal pressure from draining shared pools. Gauntlet's 6-hour illiquidity event "
-         "demonstrates this is a practical, not theoretical, risk.",
-         "HIGH"),
-        ("Contagion Disclosure",
-         "Surface cross-market exposure data in the vault UI so depositors can assess which "
-         "other vaults share their underlying markets. This information is currently not readily "
-         "available to most users.",
-         "MEDIUM"),
-        ("V1.1 Bad Debt Transparency",
-         "V1.1 vaults do not auto-realize bad debt in share prices. As demonstrated in the "
-         "MEV Capital USDC (Arb) example, the share price can continue rising while the vault "
-         "carries unrealized losses — only the TVL decline reveals the underlying issue. "
-         "Requiring explicit disclosure when vaults carry unrealized bad debt from affected "
-         "markets would improve depositor visibility.",
-         "HIGH"),
-    ]
-
-    for title, desc, priority in recs:
-        with st.container(border=True):
-            priority_colors = {"HIGH": "🔴", "MEDIUM": "🟡", "NUANCED": "🟠"}
-            st.markdown(f"**{priority_colors.get(priority, '')} {title}**")
-            st.caption(desc)
+    st.caption("See the **Recommendations** page for proposed improvements.")
 
 
 def _render_bridge_network(bridges: pd.DataFrame, n_toxic_markets: int):
@@ -333,7 +282,7 @@ def _render_bridge_network(bridges: pd.DataFrame, n_toxic_markets: int):
 
     fig = go.Figure()
 
-    # Layout: 3 columns — toxic nodes left (x=0), vaults center (x=1), clean nodes right (x=2)
+    # Layout: 3 columns: toxic nodes left (x=0), vaults center (x=1), clean nodes right (x=2)
     # Spread vaults vertically
     vault_ys = [(i / max(n - 1, 1)) for i in range(n)] if n > 1 else [0.5]
 

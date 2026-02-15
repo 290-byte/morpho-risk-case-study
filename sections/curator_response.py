@@ -1,4 +1,4 @@
-"""Section 4: Curator Response — How curators reacted to toxic exposure."""
+"""Section 4: Curator Response: How curators reacted to toxic exposure."""
 
 import streamlit as st
 import plotly.express as px
@@ -13,8 +13,14 @@ def render():
 
     vaults = load_vaults()
     if vaults.empty:
-        st.error("⚠️ Vault data not available — run the pipeline to generate `block1_vaults_graphql.csv`.")
+        st.error("⚠️ Vault data not available. Run the pipeline to generate `block1_vaults_graphql.csv`.")
         return
+
+    # Filter dust/test vaults: must have had >$10K TVL or allocation at any point
+    MIN_TVL = 10_000
+    _tvl_cols = [c for c in ["tvl_usd", "tvl_pre_depeg_usd", "tvl_at_peak_usd", "peak_allocation"] if c in vaults.columns]
+    _max_tvl = vaults[_tvl_cols].fillna(0).max(axis=1) if _tvl_cols else pd.Series(0, index=vaults.index)
+    vaults = vaults[_max_tvl >= MIN_TVL].copy()
 
     # ── Dynamic caption from data ────────────────────────────
     response_counts = vaults["response_class"].value_counts()
@@ -27,7 +33,7 @@ def render():
     st.caption(
         f"{n_total} vaults analyzed: {n_proactive} exited proactively, {n_early} reacted early, "
         f"{n_slow} responded slowly, and {n_late} maintained exposure through the analysis period "
-        f"— response speed was the primary predictor of outcome."
+        f". Response speed was the primary predictor of outcome."
     )
 
     # ── Key Metrics ─────────────────────────────────────────
@@ -58,7 +64,7 @@ def render():
             hoverinfo="text",
         ))
 
-    # Depeg lines — two separate events
+    # Depeg lines, two separate events
     fig.add_vline(x=pd.Timestamp("2025-11-04"), line_dash="dash", line_color=RED, opacity=0.7)
     fig.add_annotation(x=pd.Timestamp("2025-11-04"), y=1, yref="paper",
                        text="xUSD depeg (Nov 4)",
@@ -85,12 +91,13 @@ def render():
         color = RESPONSE_COLORS.get(response_class, "#666")
         total_tvl = subset["tvl_usd"].sum()
 
+        _tvl_label = format_usd(total_tvl).replace("$", r"\$")
         with st.expander(
-            f"**{response_class}** — {len(subset)} vaults, {format_usd(total_tvl)} current TVL",
+            f"**{response_class}**: {len(subset)} vaults, {_tvl_label} current TVL",
             expanded=(response_class == "PROACTIVE"),
         ):
             display_cols = ["vault_name", "chain", "curator", "tvl_usd", "days_before_depeg",
-                            "timelock_days", "share_price_drawdown"]
+                            "timelock_days"]
             col_config = {
                     "vault_name": "Vault",
                     "chain": "Chain",
@@ -98,7 +105,6 @@ def render():
                     "tvl_usd": st.column_config.NumberColumn("Current TVL", format="$%,.0f"),
                     "days_before_depeg": st.column_config.NumberColumn("Days Before Depeg", format="%+.1f"),
                     "timelock_days": st.column_config.NumberColumn("Timelock (days)", format="%.0f"),
-                    "share_price_drawdown": st.column_config.NumberColumn("SP Drawdown", format="%.2%"),
             }
             # Add pre-depeg TVL column if available
             if "tvl_pre_depeg_usd" in subset.columns and subset["tvl_pre_depeg_usd"].sum() > 0:
@@ -117,7 +123,7 @@ def render():
     # ── Timelock Analysis ───────────────────────────────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
     st.subheader("Timelock Distribution")
-    st.caption("Vaults with 0-day timelocks could change allocations instantly — a configuration worth monitoring.")
+    st.caption("Vaults with 0-day timelocks could change allocations instantly, a configuration worth monitoring.")
 
     col1, col2 = st.columns(2)
 
@@ -147,29 +153,38 @@ def render():
     # ── Key Insight (computed from data) ─────────────────────
     # Find the best and worst outcomes dynamically
     proactive_vaults = vaults[vaults["response_class"] == "PROACTIVE"].sort_values("tvl_usd", ascending=False)
-    late_vaults = vaults[vaults["response_class"] == "VERY_LATE"].sort_values("share_price_drawdown", ascending=True)
 
-    if not proactive_vaults.empty and not late_vaults.empty:
+    # For worst outcome: find the vault with the largest actual haircut
+    damaged_vaults = vaults[
+        vaults["share_price_drawdown"].abs() > 0.005
+    ].sort_values("share_price_drawdown", ascending=True) if not vaults.empty else pd.DataFrame()
+
+    # Fallback: VERY_LATE vaults
+    if damaged_vaults.empty:
+        damaged_vaults = vaults[
+            vaults["response_class"] == "VERY_LATE"
+        ].sort_values("share_price_drawdown", ascending=True) if not vaults.empty else pd.DataFrame()
+
+    if not proactive_vaults.empty and not damaged_vaults.empty:
         best = proactive_vaults.iloc[0]
-        worst = late_vaults.iloc[0]
+        worst = damaged_vaults.iloc[0]
 
         best_tvl = format_usd(best.get("tvl_pre_depeg_usd", best.get("tvl_usd", 0)))
         best_name = best["curator"]
         best_days = abs(int(best["days_before_depeg"]))
 
         worst_name = worst["vault_name"]
-        worst_tvl = format_usd(worst.get("tvl_usd", 0))
-        worst_dd = abs(worst.get("share_price_drawdown", 0))
+        worst_tvl = format_usd(worst.get("tvl_pre_depeg_usd", worst.get("tvl_usd", 0)))
 
         finding_text = (
-            f"**Key finding:** Response speed, not vault size, determined outcomes. "
+            f"Response speed and allocation decisions, not vault size, determined outcomes. "
             f"{best_name}'s {best_tvl} vault exited {best_days} days before the depeg with zero loss, "
-            f"while {worst_name} ({worst_tvl} TVL) suffered {worst_dd:.1%} drawdown due to "
-            f"inability to exit its position in time."
+            f"while {worst_name} ({worst_tvl} pre-depeg TVL) lost capital "
+            f"from concentrated toxic exposure."
         ).replace("$", "\\$")
     else:
         finding_text = (
-            "**Key finding:** Response speed, not vault size, was the primary determinant of outcome."
+            "Response speed, not vault size, was what mattered."
         )
 
     st.info(finding_text)

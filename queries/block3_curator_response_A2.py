@@ -109,7 +109,7 @@ def query_vault_admin_events(vault: Dict, toxic_keys: Set[str]) -> List[Dict]:
 
     # Types we need — reallocations handled by block3_B via vaultReallocates
     # API uses camelCase: setCap, submitCap, etc.
-    ADMIN_TYPES = '["setCap", "submitCap", "revokePendingCap", "revokePendingMarketRemoval", "setSupplyQueue", "setWithdrawQueue"]'
+    ADMIN_TYPES = '["setCap", "submitCap", "revokePendingCap", "submitMarketRemoval", "revokePendingMarketRemoval", "setSupplyQueue", "setWithdrawQueue"]'
 
     # ── Pass 1: Lightweight scan (filtered to admin-only types) ──
     raw_events = []

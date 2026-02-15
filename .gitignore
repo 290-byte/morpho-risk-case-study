@@ -23,3 +23,5 @@ export_dashboard_pdf.py
 morpho_case_study_summary.pdf
 morpho_case_study_dashboard.pdf
 requirements.txt
+utils/export_dashboard_text.py
+data/dashboard_full_text.md

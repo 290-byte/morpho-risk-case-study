@@ -1,6 +1,7 @@
-"""Section 6: Liquidation Failure — Oracle masking prevented all liquidations."""
+"""Section 6: Liquidation Failure: Oracle masking prevented all liquidations."""
 
 import streamlit as st
+import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from utils.data_loader import load_ltv, load_borrowers, load_asset_prices
@@ -9,18 +10,13 @@ from utils.charts import apply_layout, depeg_vline, RED, BLUE, ORANGE, GREEN, YE
 
 def render():
     st.title("Liquidation Failure Analysis")
-    st.caption(
-        "Zero liquidations occurred despite 95–99% collateral value decline. "
-        "Chainlink oracle adapters continued reporting approximately \\$1.00, masking the true risk "
-        "from the protocol's liquidation engine."
-    )
 
     ltv = load_ltv()
     borrowers = load_borrowers()
     prices = load_asset_prices()
 
     if ltv.empty and prices.empty:
-        st.error("⚠️ Data not available — run the pipeline to generate `block5_ltv_analysis.csv` and `block5_asset_prices.csv`.")
+        st.error("⚠️ Data not available. Run the pipeline to generate `block5_ltv_analysis.csv` and `block5_asset_prices.csv`.")
         return
 
     # ── Key Metrics (computed from data) ─────────────────────
@@ -36,11 +32,47 @@ def render():
     else:
         n_liquidations = 0
 
-    # Trapped borrow value from markets at >99% utilization
+    # Compute totals from event-level data for the caption
+    for col in ["seized_assets_usd", "repaid_assets_usd", "bad_debt_assets_usd"]:
+        if col in liq_events.columns:
+            liq_events[col] = pd.to_numeric(liq_events[col], errors="coerce").fillna(0)
+    _total_repaid = liq_events["repaid_assets_usd"].sum() if "repaid_assets_usd" in liq_events.columns else 0
+    _total_bd_created = liq_events["bad_debt_assets_usd"].sum() if "bad_debt_assets_usd" in liq_events.columns else 0
+
+    # Trapped borrow value from PUBLIC markets at >99% utilization
+    # Use depeg-time supply (not current interest-inflated values)
     trapped_borrow = 0
+    trapped_borrow_now = 0
     if not mkts.empty and "borrow_usd" in mkts.columns and "utilization" in mkts.columns:
-        trapped = mkts[mkts["utilization"] > 0.99]
-        trapped_borrow = trapped["borrow_usd"].sum()
+        _public = mkts[~mkts.get("is_private_market", False)] if "is_private_market" in mkts.columns else mkts
+        trapped = _public[_public["utilization"] > 0.99]
+        trapped_borrow_now = trapped["borrow_usd"].sum()
+        # Use depeg-time supply as proxy for depeg-time borrows (same at 100% util)
+        if "supply_at_depeg" in trapped.columns and trapped["supply_at_depeg"].sum() > 0:
+            trapped_borrow = trapped["supply_at_depeg"].sum()
+        else:
+            trapped_borrow = trapped_borrow_now
+
+    # Data-driven caption
+    caption_parts = []
+    if n_liquidations > 0:
+        caption_parts.append(
+            f"Only {n_liquidations} small liquidation events occurred"
+        )
+        if _total_repaid > 0 or _total_bd_created > 0:
+            caption_parts[-1] += (
+                f" ({format_usd(_total_repaid)} repaid, {format_usd(_total_bd_created)} realized bad debt)"
+            )
+        caption_parts.append(
+            f". Negligible relative to {format_usd(trapped_borrow)} in trapped borrows."
+        )
+    else:
+        caption_parts.append("Zero liquidations occurred despite 95–99% collateral value decline.")
+    caption_parts.append(
+        " Chainlink oracle adapters continued reporting approximately \\$1.00, "
+        "preventing the liquidation engine from clearing underwater positions."
+    )
+    st.caption("".join(caption_parts).replace("$", r"\$"))
 
     # Oracle price from LTV data (what the oracle reports)
     oracle_price_str = "≈\\$1.00"
@@ -54,28 +86,70 @@ def render():
             else:
                 oracle_price_str = f"\\${op_min:.2f}–\\${op_max:.2f}"
 
-    # Get collateral spot prices from bad debt detail
+    # ── Depeg-period prices ───────────────────────────────────
+    # Current spot prices are near $0.001, meaningless for explaining the crisis.
+    # During the depeg (Nov 4–6), xUSD traded $0.05–$0.30 on DEXs.
+    # We show the crisis-window range to explain why liquidations SHOULD have fired.
     bd_detail = load_bad_debt_detail()
-    min_spot = None
-    max_spot = None
-    if not bd_detail.empty and "collateral_spot_price" in bd_detail.columns:
-        spots = bd_detail[bd_detail["L2_total_bad_debt_usd"] > 100]["collateral_spot_price"]
-        spots = spots[spots > 0]
-        if not spots.empty:
-            min_spot = spots.min()
-            max_spot = spots.max()
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Liquidation Events", str(n_liquidations), help=f"Across all {len(mkts)} affected markets")
     c2.metric("Oracle Price Reported", oracle_price_str, help="Oracle adapters continued reporting near-peg values")
-    if min_spot is not None:
-        c3.metric("Actual Market Price", f"${min_spot:.3f}–${max_spot:.3f}",
-                  help=f"{(1 - min_spot) * 100:.0f}–{(1 - max_spot) * 100:.0f}% below oracle price")
-    else:
-        c3.metric("Actual Market Price", "≈$0 (collapsed)",
-                  help="Spot prices declined to near-zero")
-    c4.metric("Trapped Borrow Value", format_usd(trapped_borrow),
-              help="Debt at >99% utilization that would have been liquidated under accurate pricing")
+    c3.metric("Actual Price (Nov 4-6)", "$0.05-$0.30",
+              help="xUSD traded $0.05-$0.30 during the depeg crisis; now near $0.001")
+    c4.metric("Trapped at Depeg (public)", format_usd(trapped_borrow),
+              help="Supply in public 100% util markets at the time of the depeg. Interest has since inflated this to " + format_usd(trapped_borrow_now))
+
+    # Private market note
+    _private = mkts[mkts.get("is_private_market", False)] if "is_private_market" in mkts.columns else pd.DataFrame()
+    if not _private.empty:
+        _pm_capital = _private["original_capital_lost"].sum() if "original_capital_lost" in _private.columns else 0
+        _pm_at_depeg = _pm_capital if _pm_capital > 0 else 68_000_000
+        st.caption(
+            f"Separately, the private Elixir-Stream market on Plume had ~{format_usd(_pm_at_depeg)} "
+            f"in borrows at the time of the depeg, also unaffected by liquidation due to the same "
+            f"oracle masking.".replace("$", r"\$")
+        )
+
+    # ── Liquidation Events Detail ────────────────────────────
+    if not liq_events.empty:
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+        st.subheader("Liquidation Events Detail")
+
+        # CSV has per-event rows: date, collateral_symbol, loan_symbol,
+        # seized_assets_usd, repaid_assets_usd, bad_debt_assets_usd
+        for col in ["seized_assets_usd", "repaid_assets_usd", "bad_debt_assets_usd"]:
+            if col in liq_events.columns:
+                liq_events[col] = pd.to_numeric(liq_events[col], errors="coerce").fillna(0)
+
+        display_cols = [c for c in ["date", "collateral_symbol", "loan_symbol",
+                                     "seized_assets_usd", "repaid_assets_usd",
+                                     "bad_debt_assets_usd"] if c in liq_events.columns]
+        if display_cols:
+            st.dataframe(
+                liq_events[display_cols],
+                column_config={
+                    "date": "Date",
+                    "collateral_symbol": "Collateral",
+                    "loan_symbol": "Loan",
+                    "seized_assets_usd": st.column_config.NumberColumn("Seized (USD)", format="$%,.0f"),
+                    "repaid_assets_usd": st.column_config.NumberColumn("Repaid (USD)", format="$%,.0f"),
+                    "bad_debt_assets_usd": st.column_config.NumberColumn("Bad Debt Created", format="$%,.0f"),
+                },
+                hide_index=True, use_container_width=True,
+            )
+            total_seized = liq_events["seized_assets_usd"].sum() if "seized_assets_usd" in liq_events.columns else 0
+            total_repaid = liq_events["repaid_assets_usd"].sum() if "repaid_assets_usd" in liq_events.columns else 0
+            total_bd = liq_events["bad_debt_assets_usd"].sum() if "bad_debt_assets_usd" in liq_events.columns else 0
+            st.caption(
+                f"Total across {n_liquidations} events: {format_usd(total_seized)} seized, "
+                f"{format_usd(total_repaid)} repaid, {format_usd(total_bd)} bad debt created. "
+                f"Negligible. Most underwater positions were "
+                f"never liquidated due to oracle masking.".replace("$", "\\$")
+            )
+        else:
+            # Fallback: just show whatever columns exist
+            st.dataframe(liq_events, hide_index=True, use_container_width=True)
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
@@ -103,7 +177,7 @@ def render():
                 line=dict(color=GREEN, width=2, dash="dash"),
             ))
 
-            # LLTV threshold — pull from data if available
+            # LLTV threshold: pull from data if available
             lltv_threshold = 0.86  # fallback
             if not ltv.empty and "lltv_pct" in ltv.columns:
                 max_lltv = ltv["lltv_pct"].max()
@@ -136,7 +210,7 @@ def render():
 
     # ── LTV Analysis ────────────────────────────────────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-    st.subheader("LTV Analysis — Why Liquidations Failed")
+    st.subheader("LTV Analysis: Why Liquidations Failed")
 
     if not ltv.empty:
         # Select and rename columns for clean display
@@ -179,7 +253,7 @@ def render():
         st.info(
             "**Why Oracle LTV shows as empty for some markets:** "
             "LTV = Borrow Value / Collateral Value. When the oracle still reports collateral near \\$1 "
-            "but the actual market price is near \\$0, the oracle-computed LTV remains extremely low — "
+            "but the actual market price is near \\$0, the oracle-computed LTV remains extremely low, "
             "the protocol considers positions healthy. Using real spot prices, these positions are deeply "
             "underwater. This divergence between oracle and market prices is the mechanism by which "
             "liquidations were prevented."
@@ -215,11 +289,11 @@ def render():
         with st.container(border=True):
             st.markdown("**3. Consequence**")
             st.markdown(
-                "Zero liquidations execute\n\n"
+                f"Only {n_liquidations} minor liquidation{'s' if n_liquidations != 1 else ''}\n\n"
                 "Bad debt accumulates unrealized\n\n"
                 "Vault depositors absorb all losses"
             )
-            st.caption("The liquidation mechanism was bypassed entirely by stale oracle data.")
+            st.caption("Stale oracle data meant the liquidation mechanism never engaged.")
 
     # ── Borrower Concentration ──────────────────────────────
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)

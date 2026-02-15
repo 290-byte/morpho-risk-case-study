@@ -1,5 +1,5 @@
 """
-Centralized data loading — adapts real block*.csv outputs to section schemas.
+Centralized data loading: adapts real block*.csv outputs to section schemas.
 
 STRICT MODE: Only loads real pipeline output (block*.csv files).
 No fallback to generated/fake data. If a block file is missing,
@@ -21,6 +21,16 @@ Block file mapping:
     block6_contagion_bridges.csv    → load_bridges()
     block6_vault_allocation_summary.csv → load_exposure_summary()
     timeline_events.csv             → load_timeline()  (editorial)
+
+    block8 files (reference only, not loaded by dashboard):
+    block8_plume_transactions.csv       Plume sdeUSD/pUSD market events
+    block8_plume_market_history.csv     Hourly supply/borrow/collateral
+    block8_plume_borrower_positions.csv Current positions snapshot
+    block8_eth_transactions.csv         Ethereum sdeUSD/USDC comparison
+    block8_eth_market_history.csv       Ethereum hourly history
+    block8_oracle_comparison.csv        Oracle config side-by-side
+    Used to confirm the Plume sdeUSD/pUSD market resolved without loss
+    (borrower repaid voluntarily). See block8_query_plume_deep_dive.py.
 """
 
 import streamlit as st
@@ -28,7 +38,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-# Dashboard reads from data/ — the runner syncs pipeline outputs here.
+# Dashboard reads from data/, the runner syncs pipeline outputs here.
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 # All block files the dashboard expects
@@ -68,7 +78,7 @@ def show_data_warnings():
             "Run the query pipeline to generate them."
         )
 # ═══════════════════════════════════════════════════════════════
-#  LOADERS — one per logical dataset the sections consume
+#  LOADERS: one per logical dataset the sections consume
 # ═══════════════════════════════════════════════════════════════
 def load_markets() -> pd.DataFrame:
     """
@@ -94,7 +104,7 @@ def load_markets() -> pd.DataFrame:
     if "market_label" not in df.columns:
         df["market_label"] = df.apply(_market_label, axis=1)
 
-    # Status — derive from utilization + bad debt
+    # Status: derive from utilization + bad debt
     if "status" not in df.columns:
         if "bad_debt_status" in df.columns:
             df["status"] = df["bad_debt_status"]
@@ -123,6 +133,85 @@ def load_markets() -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
+    # ── Plume zero-USD correction ────────────────────────────
+    # The Morpho API cannot price Plume-native tokens (USDC, pUSD, xUSD),
+    # so all USD fields return $0 for Plume markets. We fall back to
+    # raw underlying values divided by token decimals (stablecoins ≈ $1).
+    if "supply_assets" in df.columns and "loan_decimals" in df.columns:
+        for idx, row in df.iterrows():
+            loan_dec = int(row.get("loan_decimals", 6) or 6)
+            raw_supply = float(row.get("supply_assets", 0) or 0)
+            raw_borrow = float(row.get("borrow_assets", 0) or 0)
+            raw_bd = float(row.get("bad_debt_underlying", 0) or 0)
+            api_supply = float(row.get("supply_usd", 0) or 0)
+
+            if raw_supply > 100 * (10 ** loan_dec) and api_supply < 1:
+                df.at[idx, "supply_usd"] = raw_supply / (10 ** loan_dec)
+                df.at[idx, "borrow_usd"] = raw_borrow / (10 ** loan_dec)
+                df.at[idx, "bad_debt_usd"] = raw_bd / (10 ** loan_dec)
+                df.at[idx, "liquidity_usd"] = 0.0
+
+    # ── Private market flag ──────────────────────────────────
+    # Mark unlisted, non-whitelisted markets as private.
+    # Currently this captures the Plume xUSD/USDC(86%) Elixir→Stream market.
+    df["is_private_market"] = False
+    if "whitelisted" in df.columns and "chain" in df.columns:
+        for idx, row in df.iterrows():
+            is_unlisted = not row.get("whitelisted", True)
+            chain = str(row.get("chain", "")).lower()
+            supply = float(row.get("supply_usd", 0) or 0)
+            # Private = unlisted Plume market with significant supply
+            if chain == "plume" and is_unlisted and supply > 1_000_000:
+                df.at[idx, "is_private_market"] = True
+
+    # ── Pre-depeg original capital (for private markets) ─────
+    # The Plume xUSD/USDC market has $306M supply (interest-inflated).
+    # The real capital lost was ~$68M: 65.8M xUSD collateral × ~$1.03 pre-depeg.
+    # We store the USD value at time of depeg, not the raw token count.
+    df["original_capital_lost"] = 0.0
+    if "collateral_assets" in df.columns and "collateral_decimals" in df.columns:
+        for idx, row in df.iterrows():
+            if row.get("is_private_market", False):
+                coll_raw = float(row.get("collateral_assets", 0) or 0)
+                coll_dec = int(row.get("collateral_decimals", 6) or 6)
+                coll_tokens = coll_raw / (10 ** coll_dec)
+                # xUSD pre-depeg price was ~$1.03
+                df.at[idx, "original_capital_lost"] = coll_tokens * 1.03
+
+    # ── Depeg-time supply (Nov 4, 2025) ──────────────────────
+    # Current supply_usd is interest-inflated for any market stuck at 100%
+    # utilization since the depeg. The allocation timeseries gives us the
+    # actual vault supply on Nov 4. We use this as the real capital at risk.
+    df["supply_at_depeg"] = 0.0
+    ts = _read("block3_allocation_timeseries.csv")
+    if not ts.empty and "market_unique_key" in ts.columns and "market_id" in df.columns:
+        ts["supply_assets_usd"] = pd.to_numeric(
+            ts.get("supply_assets_usd", pd.Series(dtype=float)), errors="coerce"
+        ).fillna(0)
+        # Nov 4 snapshot (depeg day); fall back to Nov 3 if Nov 4 missing
+        nov4 = ts[ts["date"] == "2025-11-04"]
+        if nov4.empty:
+            nov4 = ts[ts["date"] == "2025-11-03"]
+        if not nov4.empty:
+            depeg_by_mkt = nov4.groupby("market_unique_key")["supply_assets_usd"].sum()
+            for idx, row in df.iterrows():
+                mk = row.get("market_id", "")
+                ds = depeg_by_mkt.get(mk, 0)
+                if ds > 0:
+                    df.at[idx, "supply_at_depeg"] = ds
+
+    # ── Plume sdeUSD/pUSD: resolved, no funds locked ────────
+    # block8 transaction data confirmed the sole borrower (0x1Ae4...)
+    # voluntarily repaid $4.4M pUSD between Nov 3-6, allowing Re7 and
+    # Mystic MEV Capital vaults to withdraw in full. Zero liquidations
+    # occurred. This market is excluded from locked-supply metrics.
+    PLUME_SDEUSD_RESOLVED = (
+        "0x8d009383866dffaac5fe25af684e93f8dd5a98fed1991c298624ecc3a860f39f"
+    )
+    mask = df["market_id"] == PLUME_SDEUSD_RESOLVED
+    if mask.any():
+        df.loc[mask, "supply_at_depeg"] = 0.0
+
     return df
 
 def load_vaults() -> pd.DataFrame:
@@ -137,7 +226,7 @@ def load_vaults() -> pd.DataFrame:
     if vaults_raw.empty:
         return vaults_raw
 
-    # block1_vaults is per vault-market pair — aggregate to per vault
+    # block1_vaults is per vault-market pair, aggregate to per vault
     vaults_raw["supply_assets_usd"] = pd.to_numeric(
         vaults_raw.get("supply_assets_usd", 0), errors="coerce"
     ).fillna(0)
@@ -146,19 +235,26 @@ def load_vaults() -> pd.DataFrame:
     ).fillna(0)
 
     # One row per vault: take first for scalar fields, sum for exposure
-    agg = vaults_raw.groupby("vault_address", as_index=False).agg(
-        vault_name=("vault_name", "first"),
-        chain=("chain", "first"),
-        curator_name=("curator_name", "first"),
-        vault_total_assets_usd=("vault_total_assets_usd", "first"),
-        exposure_usd=("supply_assets_usd", "sum"),
-        collateral_symbol=("collateral_symbol", lambda x: ", ".join(sorted(set(x.dropna().astype(str))))),
-        exposure_status=("exposure_status", "first"),
-        discovery_method=("discovery_method", "first"),
-        vault_listed=("vault_listed", "first"),
-        timelock=("timelock", "first"),
-        vault_share_price=("vault_share_price", "first"),
-    )
+    agg_dict = {
+        "vault_name": ("vault_name", "first"),
+        "chain": ("chain", "first"),
+        "curator_name": ("curator_name", "first"),
+        "vault_total_assets_usd": ("vault_total_assets_usd", "first"),
+        "exposure_usd": ("supply_assets_usd", "sum"),
+        "collateral_symbol": ("collateral_symbol", lambda x: ", ".join(sorted(set(x.dropna().astype(str))))),
+        "exposure_status": ("exposure_status", "first"),
+        "discovery_method": ("discovery_method", "first"),
+        "vault_listed": ("vault_listed", "first"),
+        "timelock": ("timelock", "first"),
+        "vault_share_price": ("vault_share_price", "first"),
+    }
+    # Carry deposit_asset_symbol through if available (useful metadata)
+    if "deposit_asset_symbol" in vaults_raw.columns:
+        agg_dict["deposit_asset_symbol"] = ("deposit_asset_symbol", "first")
+    # Carry owner address for curator resolution
+    if "owner" in vaults_raw.columns:
+        agg_dict["owner"] = ("owner", "first")
+    agg = vaults_raw.groupby("vault_address", as_index=False).agg(**agg_dict)
 
     # Rename to section schema
     df = agg.rename(columns={
@@ -201,13 +297,17 @@ def load_vaults() -> pd.DataFrame:
     if not sp_summary.empty and "max_drawdown_pct" in sp_summary.columns:
         sp_cols = ["vault_address", "max_drawdown_pct"]
         # Also grab peak/trough/pre-depeg TVL if available
-        for extra in ["tvl_at_peak_usd", "tvl_at_trough_usd", "tvl_pre_depeg_usd"]:
+        for extra in ["tvl_at_peak_usd", "tvl_at_trough_usd", "tvl_pre_depeg_usd",
+                       "tvl_pre_depeg_native", "estimated_loss_usd"]:
             if extra in sp_summary.columns:
                 sp_cols.append(extra)
         sp = sp_summary[sp_cols].drop_duplicates("vault_address")
         sp["vault_address"] = sp["vault_address"].str.lower()
         sp = sp.rename(columns={"max_drawdown_pct": "share_price_drawdown"})
         df = df.merge(sp, on="vault_address", how="left")
+
+        # NOTE: historicalState.totalAssetsUsd returns correct vault-level TVL.
+        # Verified against Morpho website for all 3 damaged vaults (Feb 12, 2026).
 
     # ── Fill missing columns with defaults ───────────────────
     defaults = {
@@ -219,6 +319,8 @@ def load_vaults() -> pd.DataFrame:
         "tvl_at_peak_usd": 0,
         "tvl_at_trough_usd": 0,
         "tvl_pre_depeg_usd": 0,
+        "tvl_pre_depeg_native": 0,
+        "estimated_loss_usd": 0,
     }
     for col, default in defaults.items():
         if col not in df.columns:
@@ -229,7 +331,8 @@ def load_vaults() -> pd.DataFrame:
     # Ensure numerics
     for col in ["tvl_usd", "exposure_usd", "share_price", "share_price_drawdown",
                  "days_before_depeg", "timelock_days", "peak_allocation",
-                 "tvl_at_peak_usd", "tvl_at_trough_usd", "tvl_pre_depeg_usd"]:
+                 "tvl_at_peak_usd", "tvl_at_trough_usd", "tvl_pre_depeg_usd",
+                 "tvl_pre_depeg_native", "estimated_loss_usd"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
@@ -240,6 +343,41 @@ def load_vaults() -> pd.DataFrame:
     # Filter out test/invalid vault names
     if "vault_name" in df.columns:
         df = df[~df["vault_name"].str.contains("Duplicated Key|\\(Deployer\\)", case=False, na=False)]
+
+    # Clean up curator display names
+    if "curator" in df.columns:
+        NULL_ADDR = "0x0000000000000000000000000000000000000000"
+
+        for idx in df.index:
+            cur = str(df.loc[idx, "curator"])
+            if cur == NULL_ADDR:
+                # Try to infer curator from vault name (known entities)
+                vname = str(df.loc[idx, "vault_name"]) if "vault_name" in df.columns else ""
+                _known = {
+                    "MEV Capital": "MEV Capital", "Re7": "Re7 Labs",
+                    "Gauntlet": "Gauntlet", "Steakhouse": "Steakhouse",
+                    "Elixir": "Elixir", "Hyperithm": "Hyperithm",
+                }
+                matched = None
+                for keyword, name in _known.items():
+                    if keyword.lower() in vname.lower():
+                        matched = name
+                        break
+                if matched:
+                    df.loc[idx, "curator"] = f"{matched} (owner-managed)"
+                else:
+                    # Show truncated owner address
+                    owner = str(df.loc[idx, "owner"]) if "owner" in df.columns else ""
+                    if len(owner) >= 10 and owner.startswith("0x"):
+                        df.loc[idx, "curator"] = f"Owner ({owner[:6]}...{owner[-4:]})"
+                    else:
+                        df.loc[idx, "curator"] = "Owner-managed"
+
+        # Truncate remaining raw hex addresses (unverified curators)
+        _is_hex = df["curator"].str.match(r"^0x[0-9a-fA-F]{40}$", na=False)
+        df.loc[_is_hex, "curator"] = df.loc[_is_hex, "curator"].apply(
+            lambda a: f"{a[:6]}...{a[-4:]}"
+        )
 
     return df
 
@@ -380,7 +518,7 @@ def load_asset_prices() -> pd.DataFrame:
 
     df["price_usd"] = pd.to_numeric(df["price_usd"], errors="coerce")
 
-    # Some assets (xUSD) exist on multiple chains — deduplicate by
+    # Some assets (xUSD) exist on multiple chains, deduplicate by
     # keeping one price per (asset, date), preferring chain_id=1 (Ethereum)
     if "chain_id" in df.columns and "date" in df.columns:
         df = df.sort_values(["asset", "timestamp", "chain_id"])
@@ -488,7 +626,7 @@ def load_ltv() -> pd.DataFrame:
     if "liquidation_status" in df.columns and "status" not in df.columns:
         df = df.rename(columns={"liquidation_status": "status"})
 
-    # Add liquidations_count (always 0 — that's the whole point of this section)
+    # Add liquidations_count (always 0, that's the whole point of this section)
     if "liquidations_count" not in df.columns:
         df["liquidations_count"] = 0
 
@@ -682,12 +820,19 @@ def load_pre_depeg_exposure() -> pd.DataFrame:
 
 def load_timeline() -> pd.DataFrame:
     """
-    Source: timeline_events.csv (editorial, hand-written — not generated)
+    Source: timeline_events.csv (editorial, hand-written, not generated)
     Section expects: date, event, category, severity
+    Uses Python parser for robustness (hand-edited CSV may have tricky quoting).
     """
-    df = _read("timeline_events.csv")
+    path = DATA_DIR / "timeline_events.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(path, engine="python", on_bad_lines="warn")
+    except Exception:
+        df = pd.DataFrame()
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
     return df
 # ── Generic loader (for admin page / ad-hoc use) ────────────
 def load_csv(filename: str) -> pd.DataFrame:

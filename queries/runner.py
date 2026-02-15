@@ -126,6 +126,29 @@ BLOCKS = [
         ],
         "inputs": ["block1_vaults_graphql.csv", "block1_markets_graphql.csv"],
     },
+    {
+        "name": "block7_withdrawals",
+        "module": "block7_vault_withdrawals",
+        "description": "Daily TVL timeseries for damaged vaults (bank-run analysis)",
+        "outputs": [
+            "block7_vault_tvl_daily.csv",
+        ],
+        "inputs": [],  # Reads block2_share_price_summary.csv if available, falls back to hardcoded list
+    },
+    {
+        "name": "block8_plume_deep_dive",
+        "module": "block8_query_plume_deep_dive",
+        "description": "Plume sdeUSD/pUSD transaction history and oracle comparison (confirmed market resolved without loss)",
+        "outputs": [
+            "block8_plume_transactions.csv",
+            "block8_plume_market_history.csv",
+            "block8_plume_borrower_positions.csv",
+            "block8_eth_transactions.csv",
+            "block8_eth_market_history.csv",
+            "block8_oracle_comparison.csv",
+        ],
+        "inputs": [],
+    },
 ]
 
 

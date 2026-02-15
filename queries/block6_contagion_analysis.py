@@ -174,6 +174,112 @@ def query_vault_allocation(vault_address: str, chain_id: int) -> Dict:
     return vault
 
 
+def query_vault_historical_allocation(vault_address: str, chain_id: int,
+                                       snapshot_ts: int = TS_NOV_01) -> Dict:
+    """
+    Query a vault's allocation at a specific historical point (pre-depeg snapshot).
+
+    Uses historicalState.allocation with a narrow time window to get
+    supply amounts as they were BEFORE the depeg — critical for contagion
+    analysis since current supply is $0 for most exited vaults.
+
+    Returns same shape as query_vault_allocation but with historical values.
+    """
+    # Query a 2-day window ending at snapshot_ts
+    start_ts = snapshot_ts - 86400
+    end_ts = snapshot_ts
+
+    query = f"""
+    {{
+      vaultByAddress(address: "{vault_address}", chainId: {chain_id}) {{
+        address
+        name
+        symbol
+        state {{
+          totalAssetsUsd
+          totalAssets
+          totalSupply
+          fee
+        }}
+        historicalState {{
+          totalAssetsUsd(options: {{
+            startTimestamp: {start_ts}
+            endTimestamp: {end_ts}
+            interval: DAY
+          }}) {{ x y }}
+          allocation {{
+            market {{
+              uniqueKey
+              collateralAsset {{ symbol }}
+              loanAsset {{ symbol }}
+              oracleAddress
+              irmAddress
+              lltv
+            }}
+            supplyAssetsUsd(options: {{
+              startTimestamp: {start_ts}
+              endTimestamp: {end_ts}
+              interval: DAY
+            }}) {{ x y }}
+          }}
+        }}
+      }}
+    }}
+    """
+
+    result = query_graphql(query)
+
+    if "errors" in result:
+        err = result["errors"][0].get("message", "")
+        return {"error": err[:200]}
+
+    vault = result.get("data", {}).get("vaultByAddress")
+    if not vault:
+        return {"error": "Vault not found"}
+
+    # Reconstruct allocation in same shape as current-state query
+    hist = vault.get("historicalState") or {}
+
+    # Get historical total TVL
+    tvl_points = hist.get("totalAssetsUsd") or []
+    hist_tvl = 0
+    if tvl_points:
+        # Take last available data point
+        hist_tvl = safe_float(tvl_points[-1].get("y", 0))
+
+    # Build allocation entries from historical data
+    hist_allocs = hist.get("allocation") or []
+    reconstructed_allocs = []
+
+    for alloc_entry in hist_allocs:
+        market = alloc_entry.get("market")
+        if not market:
+            continue
+
+        # Get the last supply value from the timeseries
+        supply_points = alloc_entry.get("supplyAssetsUsd") or []
+        hist_supply = 0
+        if supply_points:
+            hist_supply = safe_float(supply_points[-1].get("y", 0))
+
+        reconstructed_allocs.append({
+            "market": market,
+            "supplyCap": None,
+            "supplyAssets": None,
+            "supplyAssetsUsd": hist_supply,
+        })
+
+    # Return in same shape as current-state query
+    vault["_historical"] = True
+    vault["_snapshot_ts"] = snapshot_ts
+    vault["_snapshot_date"] = datetime.fromtimestamp(snapshot_ts, tz=timezone.utc).strftime("%Y-%m-%d")
+    vault["state"] = vault.get("state") or {}
+    vault["state"]["totalAssetsUsd"] = hist_tvl
+    vault["state"]["allocation"] = reconstructed_allocs
+
+    return vault
+
+
 # ═══════════════════════════════════════════════════════════════
 #  TASK 3: Public Allocator Configuration
 # ═══════════════════════════════════════════════════════════════
@@ -574,8 +680,9 @@ def main():
     print(f"📊 TASK 2: Full Vault Allocation Snapshot")
     print(f"{'─' * 70}")
 
-    # Query vaults with significant supply (>$100)
-    significant = df_exposure[df_exposure["total_supply_usd"] > 100].copy()
+    # Query ALL vaults — current supply may be $0 for exited vaults,
+    # but we need their historical allocation data for contagion analysis
+    significant = df_exposure.copy()
     # Also include multi-market vaults even if supply is small (they show contagion paths)
     multi_market = df_exposure[df_exposure["n_toxic_markets"] > 1].copy()
     query_vaults = pd.concat([significant, multi_market]).drop_duplicates("vault_address")
@@ -583,7 +690,7 @@ def main():
     # Filter out zero-address and obviously non-vault addresses
     query_vaults = query_vaults[~query_vaults["vault_address"].str.startswith("0x000000000000")]
 
-    print(f"   Querying {len(query_vaults)} significant/multi-exposed vaults...")
+    print(f"   Querying {len(query_vaults)} vaults (pre-depeg snapshot at Nov 3 + current)...")
 
     all_allocations = []
     vault_summaries = []
@@ -595,12 +702,24 @@ def main():
 
         print(f"\n   [{idx+1}/{len(query_vaults)}] {vault_name} ({vault_addr[:10]}...) chain={chain_id}")
 
-        vault_data = query_vault_allocation(vault_addr, chain_id)
+        # Try historical allocation first (pre-depeg snapshot — shows what mattered)
+        vault_data = query_vault_historical_allocation(vault_addr, chain_id, snapshot_ts=TS_NOV_01)
         time.sleep(REQUEST_DELAY)
+
+        is_historical = "_historical" in vault_data if isinstance(vault_data, dict) else False
+
+        if "error" in vault_data:
+            print(f"      ⚠️  Historical failed: {vault_data['error'][:60]} — trying current...")
+            vault_data = query_vault_allocation(vault_addr, chain_id)
+            time.sleep(REQUEST_DELAY)
+            is_historical = False
 
         if "error" in vault_data:
             print(f"      ⚠️  {vault_data['error'][:80]}")
             continue
+
+        snapshot_label = f"(pre-depeg {vault_data.get('_snapshot_date', 'Nov 3')})" if is_historical else "(current)"
+        print(f"      {snapshot_label}")
 
         state = vault_data.get("state") or {}
         total_usd = safe_float(state.get("totalAssetsUsd", 0))
@@ -685,8 +804,6 @@ def main():
         print(f"{'─' * 70}")
 
         for _, r in df_vsumm.head(20).iterrows():
-            if r["toxic_pct_of_total"] <= 0 and r["total_assets_usd"] < 1000:
-                continue
             icon = "🔴" if r["toxic_pct_of_total"] > 50 else ("🟡" if r["toxic_pct_of_total"] > 10 else "🟢")
             print(f"\n  {icon} {r['vault_name']} ({r['curator_name']})")
             print(f"     TVL: ${r['total_assets_usd']:,.0f} | "
@@ -701,10 +818,9 @@ def main():
     print(f"🔧 TASK 3: Public Allocator Configuration")
     print(f"{'─' * 70}")
 
-    # Only query named vaults with supply > $100 (likely real vaults, not EOAs)
+    # Query named vaults (likely real vaults, not EOAs)
     pa_vaults = query_vaults[
-        (query_vaults["vault_name"] != "Unknown") &
-        (query_vaults["total_supply_usd"] > 100)
+        (query_vaults["vault_name"] != "Unknown")
     ].head(20)  # cap at 20 to limit API calls
 
     print(f"   Querying PA config for {len(pa_vaults)} named vaults...")
@@ -789,15 +905,16 @@ def main():
     print(f"🔄 TASK 4: Vault Reallocations During Crisis")
     print(f"{'─' * 70}")
 
-    # Get all unique vault addresses with significant supply
-    realloc_vaults = query_vaults[query_vaults["total_supply_usd"] > 100]["vault_address"].tolist()
-    # Also add multi-market vaults
+    # Get vault addresses for reallocation search — only named vaults (real deployments)
+    named_vaults = query_vaults[query_vaults["vault_name"] != "Unknown"]
+    realloc_vaults = named_vaults["vault_address"].tolist()
+    # Also add multi-market vaults regardless of name
     multi_addrs = df_exposure[df_exposure["n_toxic_markets"] > 1]["vault_address"].tolist()
     realloc_vaults = list(set(realloc_vaults + multi_addrs))
     # Filter out zero addresses
     realloc_vaults = [a for a in realloc_vaults if not a.startswith("0x000000000000")]
 
-    print(f"   Searching reallocations for {len(realloc_vaults)} vaults (Oct 1 → Jan 31)...")
+    print(f"   Searching reallocations for {len(realloc_vaults)} vaults (Oct 1 → Nov 30)...")
 
     # Query in batches of 10 to avoid query size limits
     all_realloc_events = []
@@ -810,7 +927,7 @@ def main():
 
         print(f"   Batch {batch_num}/{total_batches} ({len(batch)} vaults)...")
 
-        events = query_vault_reallocations(batch, TS_OCT_01, TS_JAN_31)
+        events = query_vault_reallocations(batch, TS_OCT_01, TS_DEC_01)
         all_realloc_events.extend(events)
 
         if events:
@@ -865,7 +982,7 @@ def main():
 
         print(f"   Batch {batch_num}/{total_batches}...")
 
-        events = query_pa_reallocations(batch, TS_OCT_01, TS_JAN_31)
+        events = query_pa_reallocations(batch, TS_OCT_01, TS_DEC_01)
         all_pa_events.extend(events)
 
         if events:

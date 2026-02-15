@@ -1,7 +1,7 @@
 """
 Morpho xUSD/deUSD Risk Case Study Dashboard
 =============================================
-Interactive analysis of the Nov 2025 depeg event's impact on Morpho Blue.
+Interactive analysis of the Nov 2025 depeg event's impact on Morpho.
 
 Run: streamlit run app.py
 """
