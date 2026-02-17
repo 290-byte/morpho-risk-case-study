@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.DS_Store
+*.log
+data/_workspace/
+# Docker (local testing only — not for Streamlit Cloud)
+Dockerfile
+docker-compose.yml
+dev.sh
+morpho-risk-case-study.tar.gz
+morpho-risk-case-study1.tar.gz
+data/snapshot.txt
+test
+pdf_export/
+morpho_case_study_dashboard.pdf
+export_dashboard_pdf.py
+morpho_case_study_summary.pdf
+morpho_case_study_dashboard.pdf
+utils/export_dashboard_text.py
+data/dashboard_full_text.md
+data/dashboard_full_text.md
+requirements copy.txt
